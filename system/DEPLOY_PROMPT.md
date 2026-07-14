@@ -89,12 +89,24 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    base, copiarlo a `/etc/nginx/sites-available/lab-dashboard`, enlazar a
    `sites-enabled`, `nginx -t` y reload. El dashboard debe quedar accesible en
    el puerto 80 de este servidor dentro de la red local (sin exponerlo a
-   internet). Abrir solo el puerto 80/tcp en el firewall (ufw) si está activo;
-   no tocar más reglas. La tablet va a acceder por
-   `http://<ip-local-de-este-servidor>/` por WiFi/LAN — el dashboard en sí no
-   depende de que haya internet (solo el auto-deploy vía GitHub Actions lo
-   necesita); si se cae la conexión a internet, el panel sigue funcionando y
-   sencillamente reporta "sin internet" en la tarjeta correspondiente.
+   internet). Si `ufw` está activo, **no** uses `sudo ufw allow 80/tcp` (eso
+   abre el puerto a "Anywhere", incluyendo internet si el servidor tiene otra
+   interfaz expuesta) — pregúntame primero cuál es la subred LAN real de este
+   servidor (puede no ser `192.168.100.0/24`) y usa la regla restringida:
+
+   ```bash
+   sudo ufw allow from <SUBRED_LAN>/24 to any port 80 proto tcp comment "Lab Dashboard LAN"
+   ```
+
+   Aplica el mismo criterio (`ufw allow from <SUBRED_LAN>/24 to any port ...`,
+   nunca `ufw allow <puerto>/tcp` a secas) si en el futuro se abre algún otro
+   puerto del dashboard. No tocar más reglas de firewall.
+
+   La tablet va a acceder por `http://<ip-local-de-este-servidor>/` por
+   WiFi/LAN — el dashboard en sí no depende de que haya internet (solo el
+   auto-deploy vía GitHub Actions lo necesita); si se cae la conexión a
+   internet, el panel sigue funcionando y sencillamente reporta "sin
+   internet" en la tarjeta correspondiente.
 
 8. **Verificación final**: confirmar que `systemctl status lab-dashboard.service`
    está `active`, que `curl -s localhost/api/health` responde `{"status":"ok"}`,
