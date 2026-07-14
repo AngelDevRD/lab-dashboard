@@ -21,6 +21,7 @@ frontend/
 .github/workflows/deploy.yml   # push a main -> SSH al servidor vía Tailscale -> restart
 system/
   lab-dashboard.service          # systemd: proceso del dashboard
+  ci_remote_deploy.sh            # script que corre el workflow EN el servidor (fetch/deps/tests/restart/health-check)
   lab-dashboard-update.service   # systemd: git pull + restart (fallback opcional)
   lab-dashboard-update.timer     # fallback opcional, no se instala por defecto
   update.sh
@@ -29,10 +30,25 @@ system/
 
 ## Auto-deploy (push-based, vía GitHub Actions)
 
-Cada `git push` a `main` dispara `.github/workflows/deploy.yml`: el runner se une a la
-tailnet (acción `tailscale/github-action`), se conecta por SSH al servidor y hace
-`git pull` + reinstala dependencias si cambió `requirements.txt` + `systemctl restart
-lab-dashboard.service`. No hace falta reconectarse por SSH manualmente para actualizar.
+Cada `git push` a `main` que toque `backend/`, `frontend/`, `system/` o el propio
+workflow dispara `.github/workflows/deploy.yml` (un push que solo cambia el README no
+despliega nada). El runner se une a la tailnet (`tailscale/github-action`), carga una
+deploy key dedicada y ejecuta un **despliegue seguro** por SSH:
+
+1. `git fetch origin main` + `git checkout main` + `git pull --ff-only` (nunca reescribe
+   historia local con `reset --hard`, si el fast-forward falla el deploy se detiene).
+2. Si cambió `backend/requirements.txt`, reinstala dependencias.
+3. Si existe `backend/tests/`, corre `pytest` antes de reiniciar nada.
+4. `systemctl restart lab-dashboard.service`.
+5. Health-check: reintenta `GET /api/health` hasta 20s; si no responde, el deploy se
+   marca como fallido y el job vuelca las últimas 100 líneas de
+   `journalctl -u lab-dashboard.service` en los logs de Actions.
+6. Cualquier paso que falle marca el workflow como **Failed** en GitHub — no queda
+   "verde" un deploy roto.
+
+Al terminar, el job escribe un resumen en la pestaña *Summary* del run con: commit
+desplegado, fecha/hora, estado (éxito/error), downtime estimado (segundos entre el
+restart y el primer health-check exitoso) y la URL del dashboard.
 
 Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`):
 
