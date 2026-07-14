@@ -40,15 +40,28 @@ deploy key dedicada y ejecuta un **despliegue seguro** por SSH:
 2. Si cambió `backend/requirements.txt`, reinstala dependencias.
 3. Si existe `backend/tests/`, corre `pytest` antes de reiniciar nada.
 4. `systemctl restart lab-dashboard.service`.
-5. Health-check: reintenta `GET /api/health` hasta 20s; si no responde, el deploy se
-   marca como fallido y el job vuelca las últimas 100 líneas de
-   `journalctl -u lab-dashboard.service` en los logs de Actions.
-6. Cualquier paso que falle marca el workflow como **Failed** en GitHub — no queda
-   "verde" un deploy roto.
+5. Health-check: reintenta `GET /api/health` hasta 20s.
+6. **Si cualquiera de los pasos 2-5 falla**, rollback automático: `git reset --hard`
+   al commit anterior, reinstala dependencias de esa versión si hace falta, reinicia
+   el servicio y vuelve a verificar `/api/health`. La tablet nunca se queda mostrando
+   una versión rota — sigue corriendo la última que sí pasó el health-check.
+7. El job de Actions se marca como **Failed** de todos modos si hubo que hacer
+   rollback (para que te enteres), con las últimas 100 líneas de
+   `journalctl -u lab-dashboard.service` y el resultado del rollback en los logs.
 
 Al terminar, el job escribe un resumen en la pestaña *Summary* del run con: commit
 desplegado, fecha/hora, estado (éxito/error), downtime estimado (segundos entre el
-restart y el primer health-check exitoso) y la URL del dashboard.
+restart y el primer health-check exitoso), resultado del rollback si aplicó, y la URL
+del dashboard.
+
+**Usuario dedicado**: todo el proceso (dueño de `/opt/lab-dashboard`, proceso del
+servicio, y la cuenta que usa GitHub Actions por SSH) corre bajo `dashboard-deploy`,
+un usuario de sistema sin privilegios — nunca root ni tu usuario personal. Su único
+permiso sudo es reiniciar `lab-dashboard.service`, nada más (`/etc/sudoers.d/lab-dashboard`).
+
+El dashboard en sí (frontend + WebSocket + polling SSH a los servidores del lab) no
+depende de internet, solo de la red local — únicamente el auto-deploy necesita que
+este servidor alcance GitHub/Tailscale.
 
 Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`):
 
@@ -56,7 +69,7 @@ Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`
 |---|---|
 | `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_CLIENT_SECRET` | Cliente OAuth de Tailscale (admin console → Settings → OAuth clients), con el tag `tag:ci` autorizado en tu ACL |
 | `SSH_HOST` | IP o nombre MagicDNS Tailscale del servidor de destino |
-| `SSH_USER` | Usuario SSH del servidor (ej. `ubuntu`) |
+| `SSH_USER` | `dashboard-deploy` (usuario dedicado, no root ni tu usuario personal) |
 | `SSH_PRIVATE_KEY` | Clave privada de una **deploy key dedicada** (no tu clave personal), cuya pública está en `authorized_keys` del servidor |
 
 El servicio del sistema (`system/lab-dashboard-update.service/.timer`) queda como

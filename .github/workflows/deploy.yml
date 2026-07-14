@@ -59,6 +59,8 @@ jobs:
           STATUS=$(echo "$OUTPUT" | grep -oP '(?<=DEPLOY_STATUS=)\S+' | tail -1)
           COMMIT=$(echo "$OUTPUT" | grep -oP '(?<=DEPLOY_COMMIT=)\S+' | tail -1)
           DOWNTIME=$(echo "$OUTPUT" | grep -oP '(?<=DEPLOY_DOWNTIME=)\S+' | tail -1)
+          ROLLBACK=$(echo "$OUTPUT" | grep -oP '(?<=DEPLOY_ROLLBACK=)\S+' | tail -1)
+          ROLLBACK_COMMIT=$(echo "$OUTPUT" | grep -oP '(?<=DEPLOY_ROLLBACK_COMMIT=)\S+' | tail -1)
           STATUS="${STATUS:-unknown}"
           DURATION=$(( $(date +%s) - JOB_START ))
 
@@ -72,6 +74,11 @@ jobs:
             echo "| Duración del deploy | ${DURATION}s |"
             echo "| Downtime estimado | ${DOWNTIME:-N/A}s |"
             echo "| Estado | $STATUS |"
+            if [ "$ROLLBACK" = "success" ]; then
+              echo "| Rollback | ✅ automático a \`${ROLLBACK_COMMIT:-commit anterior}\` — la tablet sigue mostrando la última versión estable |"
+            elif [ "$ROLLBACK" = "failed" ]; then
+              echo "| Rollback | ❌ el rollback automático también falló — revisar el servidor manualmente |"
+            fi
             echo "| Dashboard | http://${{ secrets.SSH_HOST }}/ |"
             echo ""
             if [ "$STATUS" != "success" ]; then

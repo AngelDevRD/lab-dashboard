@@ -9,7 +9,10 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
 (repo privado, rama `main`). Hazlo todo automáticamente:
 
 1. **Clonar el repo** en `/opt/lab-dashboard` (crear el directorio con sudo si hace
-   falta, dueño el usuario actual). Si `gh` no está autenticado en este servidor,
+   falta). Este servidor va a correr todo bajo un usuario de sistema dedicado
+   `dashboard-deploy` (ver punto 6) — créalo primero si aún no existe y deja
+   `/opt/lab-dashboard` con ese usuario como dueño, no tu usuario personal ni
+   root. Si `gh` no está autenticado en este servidor,
    usa una deploy key: genera un par de claves SSH dedicado
    (`~/.ssh/lab_dashboard_deploy`), muéstrame la clave pública para agregarla como
    "Deploy Key" (solo lectura) en GitHub, y configura `~/.ssh/config` para que el
@@ -29,39 +32,53 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    continuar.
 
 5. **Servicio systemd**: usar `system/lab-dashboard.service` como base — reemplazar
-   `__DEPLOY_USER__` por el usuario real, copiarlo a `/etc/systemd/system/`,
+   `__DEPLOY_USER__` por `dashboard-deploy` (el mismo usuario dedicado del punto 6,
+   dueño de `/opt/lab-dashboard`), copiarlo a `/etc/systemd/system/`,
    `systemctl daemon-reload`, `enable --now lab-dashboard.service`. Debe reiniciar
    solo si falla (`Restart=always`) y arrancar en cada boot (`enable`).
 
-6. **Auto-actualización (push-based, vía GitHub Actions)**: el repo ya trae
-   `.github/workflows/deploy.yml` + `system/ci_remote_deploy.sh`. Cada
-   `git push` a `main` (que toque `backend/`, `frontend/` o `system/`) dispara
-   el workflow: el runner de GitHub se une a mi tailnet (`tailscale/github-action`)
-   y se conecta por SSH a este servidor para correr `ci_remote_deploy.sh`, que
-   hace `git fetch` + `checkout main` + `pull --ff-only` (nunca reescribe
-   historia local), reinstala dependencias si cambió `requirements.txt`, corre
-   `pytest` si existe `backend/tests/`, reinicia el servicio y hace
-   health-check contra `/api/health` con reintentos de hasta 20s — si algo
-   falla, el job de GitHub Actions queda marcado como fallido con los últimos
-   100 logs de `journalctl -u lab-dashboard.service`. Para que funcione
-   necesito que dejes listo en este servidor:
+6. **Auto-actualización (push-based, vía GitHub Actions, con usuario dedicado
+   y rollback automático)**: el repo ya trae `.github/workflows/deploy.yml` +
+   `system/ci_remote_deploy.sh`. Cada `git push` a `main` (que toque
+   `backend/`, `frontend/` o `system/`) dispara el workflow: el runner de
+   GitHub se une a mi tailnet (`tailscale/github-action`) y se conecta por SSH
+   a este servidor para correr `ci_remote_deploy.sh`, que hace `git fetch` +
+   `checkout main` + `pull --ff-only` (nunca reescribe historia local),
+   reinstala dependencias si cambió `requirements.txt`, corre `pytest` si
+   existe `backend/tests/`, reinicia el servicio y hace health-check contra
+   `/api/health` con reintentos de hasta 20s. **Si cualquiera de esos pasos
+   falla, hace rollback automático**: vuelve al commit anterior con
+   `git reset --hard`, reinstala dependencias de esa versión si hace falta,
+   reinicia el servicio otra vez y vuelve a verificar `/api/health` — así una
+   actualización rota no deja la tablet mostrando error, sigue corriendo la
+   última versión estable. El job de GitHub Actions queda marcado como
+   fallido de todos modos (para que yo me entere), con los últimos 100 logs
+   de `journalctl -u lab-dashboard.service` y el resultado del rollback.
+
+   Este proceso **no debe correr como root ni con mi usuario personal**.
+   Necesito que crees un usuario de sistema dedicado solo para esto:
+
+   - Crear el usuario `dashboard-deploy` (`sudo useradd --system --create-home
+     --shell /bin/bash dashboard-deploy`), sin acceso a nada más del servidor.
+   - Dueño de `/opt/lab-dashboard` debe ser `dashboard-deploy` (o un grupo
+     compartido con permisos de escritura para ese usuario).
    - Tailscale instalado y conectado a mi tailnet (si no lo está: `curl -fsSL
      https://tailscale.com/install.sh | sh && sudo tailscale up`), y dime la IP
      Tailscale (`tailscale ip -4`) o el nombre MagicDNS de este equipo.
-   - Una **deploy key SSH dedicada** (no la mía personal): genera un par
-     `~/.ssh/gh_deploy_key` sin passphrase, agrega la pública a
-     `~/.ssh/authorized_keys`, y muéstrame la privada para cargarla como
-     secret `SSH_PRIVATE_KEY` en GitHub (yo la agrego, tú no la subas a
-     ningún lado).
-   - Permiso sudo sin contraseña **solo** para
-     `systemctl restart lab-dashboard.service` (regla específica en
-     `/etc/sudoers.d/lab-dashboard`, no sudo general) para el usuario SSH
-     usado por el deploy.
+   - Una **deploy key SSH dedicada** para `dashboard-deploy` (no mi clave
+     personal): genera un par `~/.ssh/gh_deploy_key` sin passphrase para ese
+     usuario, agrega la pública a su `~/.ssh/authorized_keys`, y muéstrame la
+     privada para cargarla como secret `SSH_PRIVATE_KEY` en GitHub (yo la
+     agrego, tú no la subas a ningún lado).
+   - Permiso sudo sin contraseña para `dashboard-deploy`, **acotado
+     únicamente** a `systemctl restart lab-dashboard.service` (regla
+     específica en `/etc/sudoers.d/lab-dashboard`, no sudo general, no acceso
+     a otros comandos ni servicios).
 
-   Dime al final: la IP/nombre Tailscale, el usuario SSH y la clave privada
-   generada — yo configuro los secrets `TS_OAUTH_CLIENT_ID`,
-   `TS_OAUTH_CLIENT_SECRET`, `SSH_HOST`, `SSH_USER` y `SSH_PRIVATE_KEY` en
-   GitHub Actions desde mi lado.
+   Dime al final: la IP/nombre Tailscale, y la clave privada de
+   `dashboard-deploy` — yo configuro los secrets `TS_OAUTH_CLIENT_ID`,
+   `TS_OAUTH_CLIENT_SECRET`, `SSH_HOST`, `SSH_USER=dashboard-deploy` y
+   `SSH_PRIVATE_KEY` en GitHub Actions desde mi lado.
 
    Como respaldo opcional (si Actions no puede alcanzar el servidor), el repo
    también trae `system/lab-dashboard-update.service` + `.timer` +
@@ -73,7 +90,11 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    `sites-enabled`, `nginx -t` y reload. El dashboard debe quedar accesible en
    el puerto 80 de este servidor dentro de la red local (sin exponerlo a
    internet). Abrir solo el puerto 80/tcp en el firewall (ufw) si está activo;
-   no tocar más reglas.
+   no tocar más reglas. La tablet va a acceder por
+   `http://<ip-local-de-este-servidor>/` por WiFi/LAN — el dashboard en sí no
+   depende de que haya internet (solo el auto-deploy vía GitHub Actions lo
+   necesita); si se cae la conexión a internet, el panel sigue funcionando y
+   sencillamente reporta "sin internet" en la tarjeta correspondiente.
 
 8. **Verificación final**: confirmar que `systemctl status lab-dashboard.service`
    está `active`, que `curl -s localhost/api/health` responde `{"status":"ok"}`,
