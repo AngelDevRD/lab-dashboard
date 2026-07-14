@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 import paramiko
 
@@ -9,7 +10,11 @@ logger = logging.getLogger("dashboard")
 
 
 class SSHConnection:
-    """Reusable SSH connection for one server. Reconnects lazily on failure."""
+    """Reusable SSH connection for one server.
+
+    Reconnects lazily on failure, backing off exponentially so a downed
+    server or bad credentials can't produce a rapid-fire reconnect storm.
+    """
 
     def __init__(self, host: str, port: int, username: str):
         self.host = host
@@ -17,27 +22,77 @@ class SSHConnection:
         self.username = username
         self._client: paramiko.SSHClient | None = None
         self._lock = asyncio.Lock()
+        self._consecutive_failures = 0
+        self._next_attempt_at = 0.0
+
+    def _backoff_seconds(self) -> float:
+        return min(
+            config.SSH_BACKOFF_BASE * (2**self._consecutive_failures),
+            config.SSH_BACKOFF_MAX,
+        )
+
+    def _in_backoff(self) -> bool:
+        return time.monotonic() < self._next_attempt_at
+
+    def _close_client(self, client: paramiko.SSHClient | None) -> None:
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 - closing must never raise
+            logger.debug("Error closing SSH client for %s", self.host, exc_info=True)
+
+    def _on_failure(self, exc: Exception) -> None:
+        self._close_client(self._client)
+        self._client = None
+        self._consecutive_failures += 1
+        wait = self._backoff_seconds()
+        self._next_attempt_at = time.monotonic() + wait
+        logger.warning(
+            "%s no responde (fallo #%d): %s - próximo intento en %.0fs",
+            self.host,
+            self._consecutive_failures,
+            exc,
+            wait,
+        )
+
+    def _on_connect_success(self) -> None:
+        if self._consecutive_failures:
+            logger.info(
+                "%s volvió a responder tras %d fallo(s)",
+                self.host,
+                self._consecutive_failures,
+            )
+        self._consecutive_failures = 0
+        self._next_attempt_at = 0.0
 
     def _connect_blocking(self) -> None:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            hostname=self.host,
-            port=self.port,
-            username=self.username,
-            key_filename=config.SSH_KEY_PATH,
-            timeout=config.SSH_TIMEOUT,
-            banner_timeout=config.SSH_TIMEOUT,
-            auth_timeout=config.SSH_TIMEOUT,
-        )
+        try:
+            client.connect(
+                hostname=self.host,
+                port=self.port,
+                username=self.username,
+                key_filename=config.SSH_KEY_PATH,
+                timeout=config.SSH_TIMEOUT,
+                banner_timeout=config.SSH_TIMEOUT,
+                auth_timeout=config.SSH_TIMEOUT,
+            )
+        except Exception:
+            self._close_client(client)
+            raise
         self._client = client
+        self._on_connect_success()
 
     def _run_blocking(self, command: str) -> tuple[bool, str]:
         try:
-            if self._client is None:
-                self._connect_blocking()
             transport = self._client.get_transport() if self._client else None
-            if transport is None or not transport.is_active():
+            needs_connect = transport is None or not transport.is_active()
+            if needs_connect:
+                if self._in_backoff():
+                    remaining = self._next_attempt_at - time.monotonic()
+                    return False, (f"en backoff, próximo intento en {remaining:.0f}s")
                 self._connect_blocking()
             stdin, stdout, stderr = self._client.exec_command(
                 command, timeout=config.SSH_COMMAND_TIMEOUT
@@ -46,8 +101,7 @@ class SSHConnection:
             stdout.channel.recv_exit_status()
             return True, out
         except Exception as exc:  # noqa: BLE001 - any SSH/network failure means offline
-            self._client = None
-            logger.warning("SSH failed for %s: %s", self.host, exc)
+            self._on_failure(exc)
             return False, str(exc)
 
     async def run(self, command: str) -> tuple[bool, str]:
@@ -70,9 +124,8 @@ class SSHConnection:
             return results
 
     def close(self) -> None:
-        if self._client:
-            self._client.close()
-            self._client = None
+        self._close_client(self._client)
+        self._client = None
 
 
 class SSHPool:
