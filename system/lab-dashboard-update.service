@@ -1,0 +1,8 @@
+[Unit]
+Description=Lab Dashboard auto-update (git pull + restart if changed)
+
+[Service]
+Type=oneshot
+User=__DEPLOY_USER__
+WorkingDirectory=/opt/lab-dashboard
+ExecStart=/opt/lab-dashboard/system/update.sh

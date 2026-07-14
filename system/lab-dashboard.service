@@ -1,0 +1,18 @@
+[Unit]
+Description=Lab Dashboard (FastAPI monitoring backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__DEPLOY_USER__
+WorkingDirectory=/opt/lab-dashboard/backend
+EnvironmentFile=-/opt/lab-dashboard/backend/.env
+ExecStart=/opt/lab-dashboard/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8600
+Restart=always
+RestartSec=3
+StandardOutput=append:/opt/lab-dashboard/logs/service.log
+StandardError=append:/opt/lab-dashboard/logs/service.log
+
+[Install]
+WantedBy=multi-user.target
