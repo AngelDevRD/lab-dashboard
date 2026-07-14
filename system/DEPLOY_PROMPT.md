@@ -34,12 +34,17 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    solo si falla (`Restart=always`) y arrancar en cada boot (`enable`).
 
 6. **Auto-actualización (push-based, vía GitHub Actions)**: el repo ya trae
-   `.github/workflows/deploy.yml`. Cada `git push` a `main` desde mi PC dispara
+   `.github/workflows/deploy.yml` + `system/ci_remote_deploy.sh`. Cada
+   `git push` a `main` (que toque `backend/`, `frontend/` o `system/`) dispara
    el workflow: el runner de GitHub se une a mi tailnet (`tailscale/github-action`)
-   y se conecta por SSH a este servidor para hacer `git pull` + reinstalar
-   dependencias si cambió `requirements.txt` + `systemctl restart
-   lab-dashboard.service`. Para que funcione necesito que dejes listo en este
-   servidor:
+   y se conecta por SSH a este servidor para correr `ci_remote_deploy.sh`, que
+   hace `git fetch` + `checkout main` + `pull --ff-only` (nunca reescribe
+   historia local), reinstala dependencias si cambió `requirements.txt`, corre
+   `pytest` si existe `backend/tests/`, reinicia el servicio y hace
+   health-check contra `/api/health` con reintentos de hasta 20s — si algo
+   falla, el job de GitHub Actions queda marcado como fallido con los últimos
+   100 logs de `journalctl -u lab-dashboard.service`. Para que funcione
+   necesito que dejes listo en este servidor:
    - Tailscale instalado y conectado a mi tailnet (si no lo está: `curl -fsSL
      https://tailscale.com/install.sh | sh && sudo tailscale up`), y dime la IP
      Tailscale (`tailscale ip -4`) o el nombre MagicDNS de este equipo.
@@ -71,11 +76,12 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    no tocar más reglas.
 
 8. **Verificación final**: confirmar que `systemctl status lab-dashboard.service`
-   y `lab-dashboard-update.timer` están `active`, que `curl -s localhost/api/health`
-   responde `{"status":"ok"}`, y que al menos un servidor del `servers.json`
-   aparece `online` en `/api/status` (si no, dejar claro que falta agregar la
-   clave pública SSH a los `authorized_keys` de los servidores monitoreados —
-   no es un bug del código).
+   está `active`, que `curl -s localhost/api/health` responde `{"status":"ok"}`,
+   y que al menos un servidor del `servers.json` (usuario SSH `angel1`) aparece
+   `online` en `/api/status` (si no, dejar claro que falta agregar la clave
+   pública SSH — `~/.ssh/id_ed25519.pub` generada en el paso 3 — a
+   `authorized_keys` del usuario `angel1` en los servidores monitoreados; no es
+   un bug del código).
 
 No expongas el dashboard a internet, no abras más puertos de los necesarios, y
 antes de cualquier cambio irreversible (borrar algo, sobrescribir configs
