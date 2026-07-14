@@ -18,13 +18,34 @@ frontend/
   index.html
   static/css/style.css
   static/js/app.js
+.github/workflows/deploy.yml   # push a main -> SSH al servidor vía Tailscale -> restart
 system/
   lab-dashboard.service          # systemd: proceso del dashboard
-  lab-dashboard-update.service   # systemd: git pull + restart
-  lab-dashboard-update.timer     # dispara el update cada 60s
+  lab-dashboard-update.service   # systemd: git pull + restart (fallback opcional)
+  lab-dashboard-update.timer     # fallback opcional, no se instala por defecto
   update.sh
   nginx.conf
 ```
+
+## Auto-deploy (push-based, vía GitHub Actions)
+
+Cada `git push` a `main` dispara `.github/workflows/deploy.yml`: el runner se une a la
+tailnet (acción `tailscale/github-action`), se conecta por SSH al servidor y hace
+`git pull` + reinstala dependencias si cambió `requirements.txt` + `systemctl restart
+lab-dashboard.service`. No hace falta reconectarse por SSH manualmente para actualizar.
+
+Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`):
+
+| Secret | Valor |
+|---|---|
+| `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_CLIENT_SECRET` | Cliente OAuth de Tailscale (admin console → Settings → OAuth clients), con el tag `tag:ci` autorizado en tu ACL |
+| `SSH_HOST` | IP o nombre MagicDNS Tailscale del servidor de destino |
+| `SSH_USER` | Usuario SSH del servidor (ej. `ubuntu`) |
+| `SSH_PRIVATE_KEY` | Clave privada de una **deploy key dedicada** (no tu clave personal), cuya pública está en `authorized_keys` del servidor |
+
+El servicio del sistema (`system/lab-dashboard-update.service/.timer`) queda como
+fallback opcional por si Actions no puede alcanzar el servidor — no se instala por
+defecto, ver `system/DEPLOY_PROMPT.md`.
 
 ## Agregar un servidor
 

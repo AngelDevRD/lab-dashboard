@@ -33,15 +33,35 @@ Quiero desplegar en este servidor Ubuntu el proyecto "Lab Dashboard", un backend
    `systemctl daemon-reload`, `enable --now lab-dashboard.service`. Debe reiniciar
    solo si falla (`Restart=always`) y arrancar en cada boot (`enable`).
 
-6. **Auto-actualización**: usar `system/lab-dashboard-update.service` y
-   `.timer` (reemplazar `__DEPLOY_USER__` también ahí) más `system/update.sh`
-   (dar permisos de ejecución). El timer corre cada 60s, hace `git fetch` +
-   `reset --hard origin/main`, y si hubo cambios reinstala dependencias (si
-   cambió `requirements.txt`) y reinicia SOLO `lab-dashboard.service`. El
-   usuario del servicio necesita permiso sudo sin contraseña para
-   `systemctl restart lab-dashboard.service` únicamente (agregar una regla
-   específica en `/etc/sudoers.d/lab-dashboard`, no sudo general).
-   Habilitar y arrancar el timer con `systemctl enable --now lab-dashboard-update.timer`.
+6. **Auto-actualización (push-based, vía GitHub Actions)**: el repo ya trae
+   `.github/workflows/deploy.yml`. Cada `git push` a `main` desde mi PC dispara
+   el workflow: el runner de GitHub se une a mi tailnet (`tailscale/github-action`)
+   y se conecta por SSH a este servidor para hacer `git pull` + reinstalar
+   dependencias si cambió `requirements.txt` + `systemctl restart
+   lab-dashboard.service`. Para que funcione necesito que dejes listo en este
+   servidor:
+   - Tailscale instalado y conectado a mi tailnet (si no lo está: `curl -fsSL
+     https://tailscale.com/install.sh | sh && sudo tailscale up`), y dime la IP
+     Tailscale (`tailscale ip -4`) o el nombre MagicDNS de este equipo.
+   - Una **deploy key SSH dedicada** (no la mía personal): genera un par
+     `~/.ssh/gh_deploy_key` sin passphrase, agrega la pública a
+     `~/.ssh/authorized_keys`, y muéstrame la privada para cargarla como
+     secret `SSH_PRIVATE_KEY` en GitHub (yo la agrego, tú no la subas a
+     ningún lado).
+   - Permiso sudo sin contraseña **solo** para
+     `systemctl restart lab-dashboard.service` (regla específica en
+     `/etc/sudoers.d/lab-dashboard`, no sudo general) para el usuario SSH
+     usado por el deploy.
+
+   Dime al final: la IP/nombre Tailscale, el usuario SSH y la clave privada
+   generada — yo configuro los secrets `TS_OAUTH_CLIENT_ID`,
+   `TS_OAUTH_CLIENT_SECRET`, `SSH_HOST`, `SSH_USER` y `SSH_PRIVATE_KEY` en
+   GitHub Actions desde mi lado.
+
+   Como respaldo opcional (si Actions no puede alcanzar el servidor), el repo
+   también trae `system/lab-dashboard-update.service` + `.timer` +
+   `update.sh`, que hacen lo mismo por polling cada 60s en vez de push. No los
+   instales salvo que te lo pida explícitamente.
 
 7. **Nginx** (si está instalado o lo instalas): usar `system/nginx.conf` como
    base, copiarlo a `/etc/nginx/sites-available/lab-dashboard`, enlazar a
