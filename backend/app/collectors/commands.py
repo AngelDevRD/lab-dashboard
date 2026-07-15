@@ -15,6 +15,10 @@ COMMANDS = {
     "docker": (
         "docker ps -a --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null || echo '__NO_DOCKER__'"
     ),
+    "docker_disk": (
+        "docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null || echo '__NO_DOCKER__'"
+    ),
+    "updates": "apt list --upgradable 2>/dev/null | tail -n +2 | wc -l",
     "services": (
         "systemctl is-active ssh docker tailscaled nginx fastapi postgresql "
         "redis-server portainer uptime-kuma 2>/dev/null"

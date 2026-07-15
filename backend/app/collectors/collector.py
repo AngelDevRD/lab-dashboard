@@ -24,6 +24,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
     def out(key: str) -> str:
         return results.get(key, (False, ""))[1]
 
+    cpu_temp = parsers.parse_cpu_temp(out("cpu_temp"))
     snapshot = {
         "name": server.get("name", host),
         "host": host,
@@ -33,7 +34,8 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "load": parsers.parse_loadavg(out("loadavg")),
         "cpu": {
             **parsers.parse_cpu(out("cpu"), host),
-            "temp": parsers.parse_cpu_temp(out("cpu_temp")),
+            "temp": cpu_temp["value"],
+            "temp_per_core": cpu_temp["per_core"],
         },
         "mem": parsers.parse_mem(out("mem")),
         "disk": parsers.parse_disk(out("disk")),
@@ -42,6 +44,8 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
             **parsers.parse_net_io(out("net_io"), host, now),
         },
         "docker": parsers.parse_docker(out("docker")),
+        "docker_disk": parsers.parse_docker_disk(out("docker_disk")),
+        "updates_pending": parsers.parse_updates(out("updates")),
         "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
         "power": parsers.parse_battery(out("battery")),
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),

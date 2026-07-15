@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from datetime import date
 
 from . import config, events
 from .collectors.collector import collect_internet, collect_server
@@ -19,6 +20,9 @@ class Monitor:
         }
         self._prev_online: dict[str, bool] = {}
         self._last_down_since: dict[str, float] = {}
+        self._daily_baseline: dict[str, tuple[str, int, int]] = (
+            {}
+        )  # host -> (date, rx0, tx0)
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
         self._task: asyncio.Task | None = None
@@ -37,6 +41,8 @@ class Monitor:
                 "last_update": time.time(),
                 "error": str(exc),
             }
+        if snapshot.get("online"):
+            self._apply_daily_traffic(server["host"], snapshot)
         self.servers_status[server["host"]] = snapshot
 
         was_online = self._prev_online.get(server["host"])
@@ -50,6 +56,27 @@ class Monitor:
                 events.log_event("server_down", f"{snapshot['name']} dejó de responder")
                 self._last_down_since[server["host"]] = time.time()
         self._prev_online[server["host"]] = is_online
+
+    def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
+        net = snapshot.get("net", {})
+        rx_total = net.get("rx_total")
+        tx_total = net.get("tx_total")
+        if rx_total is None or tx_total is None:
+            return
+        today = date.today().isoformat()
+        baseline = self._daily_baseline.get(host)
+        if (
+            baseline is None
+            or baseline[0] != today
+            or rx_total < baseline[1]
+            or tx_total < baseline[2]
+        ):
+            # new day, first sample, or counters reset (reboot) -> start fresh baseline
+            self._daily_baseline[host] = (today, rx_total, tx_total)
+            baseline = self._daily_baseline[host]
+        _, rx0, tx0 = baseline
+        net["daily_download_bytes"] = rx_total - rx0
+        net["daily_upload_bytes"] = tx_total - tx0
 
     async def _poll_internet(self, servers: list[dict]) -> None:
         online_server = next(

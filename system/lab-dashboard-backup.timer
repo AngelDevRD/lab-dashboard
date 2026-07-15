@@ -1,0 +1,10 @@
+[Unit]
+Description=Lab Dashboard - dispara backup.sh todas las noches
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

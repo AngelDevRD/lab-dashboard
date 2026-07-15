@@ -57,24 +57,36 @@ def parse_cpu(raw: str, host: str) -> dict:
     return {"percent": max(0.0, min(100.0, percent)), "cores": nproc}
 
 
-def parse_cpu_temp(raw: str) -> float | None:
+def parse_cpu_temp(raw: str) -> dict:
+    """Returns {"value": <primary/avg temp>, "per_core": [temps...]}."""
     raw = raw.strip()
     if not raw:
-        return None
+        return {"value": None, "per_core": []}
     try:
         data = json.loads(raw)
+        per_core: list[float] = []
         for chip in data.values():
-            for sensor in chip.values():
-                if isinstance(sensor, dict):
-                    for k, v in sensor.items():
-                        if "input" in k and isinstance(v, (int, float)):
-                            return round(float(v), 1)
+            for label, sensor in chip.items():
+                if not isinstance(sensor, dict):
+                    continue
+                for k, v in sensor.items():
+                    if "input" in k and isinstance(v, (int, float)):
+                        if re.search(r"core|cpu", label, re.IGNORECASE):
+                            per_core.append(round(float(v), 1))
+                        elif not per_core:
+                            per_core.append(round(float(v), 1))
+        if per_core:
+            return {
+                "value": round(sum(per_core) / len(per_core), 1),
+                "per_core": per_core,
+            }
     except (json.JSONDecodeError, AttributeError):
         pass
     nums = [int(x) for x in raw.splitlines() if x.strip().isdigit()]
     if nums:
-        return round(nums[0] / 1000, 1)
-    return None
+        temps = [round(n / 1000, 1) for n in nums]
+        return {"value": temps[0], "per_core": temps}
+    return {"value": None, "per_core": []}
 
 
 def parse_mem(raw: str) -> dict:
@@ -87,7 +99,17 @@ def parse_mem(raw: str) -> dict:
     available = info.get("MemAvailable", info.get("MemFree", 0))
     used = max(0, total - available)
     percent = round(used / total * 100, 1) if total else 0.0
-    return {"total": total, "used": used, "free": available, "percent": percent}
+    swap_total = info.get("SwapTotal", 0)
+    swap_free = info.get("SwapFree", 0)
+    swap_used = max(0, swap_total - swap_free)
+    swap_percent = round(swap_used / swap_total * 100, 1) if swap_total else 0.0
+    return {
+        "total": total,
+        "used": used,
+        "free": available,
+        "percent": percent,
+        "swap": {"total": swap_total, "used": swap_used, "percent": swap_percent},
+    }
 
 
 def parse_disk(raw: str) -> dict:
@@ -120,13 +142,18 @@ def parse_net_io(raw: str, host: str, now: float) -> dict:
 
     prev = _prev_net_samples.get(host)
     _prev_net_samples[host] = (now, rx_total, tx_total)
+    result = {"rx_total": rx_total, "tx_total": tx_total}
     if not prev:
-        return {"download_bps": 0, "upload_bps": 0}
+        return {**result, "download_bps": 0, "upload_bps": 0}
     prev_time, prev_rx, prev_tx = prev
     dt = max(now - prev_time, 0.001)
     download_bps = max(0, (rx_total - prev_rx) / dt)
     upload_bps = max(0, (tx_total - prev_tx) / dt)
-    return {"download_bps": round(download_bps), "upload_bps": round(upload_bps)}
+    return {
+        **result,
+        "download_bps": round(download_bps),
+        "upload_bps": round(upload_bps),
+    }
 
 
 def parse_docker(raw: str) -> dict:
@@ -201,6 +228,43 @@ def parse_top_procs(raw: str) -> list[dict]:
             except ValueError:
                 continue
     return procs
+
+
+_SIZE_UNITS = {
+    "B": 1,
+    "kB": 1000,
+    "KB": 1024,
+    "MB": 1000**2,
+    "MiB": 1024**2,
+    "GB": 1000**3,
+    "GiB": 1024**3,
+    "TB": 1000**4,
+}
+
+
+def parse_docker_disk(raw: str) -> dict | None:
+    raw = raw.strip()
+    if not raw or raw == "__NO_DOCKER__":
+        return None
+    total_bytes = 0
+    for line in raw.splitlines():
+        parts = line.split("|")
+        if len(parts) != 2:
+            continue
+        _, size = parts
+        m = re.match(r"([\d.]+)\s*([A-Za-z]+)", size.strip())
+        if not m:
+            continue
+        value, unit = m.groups()
+        total_bytes += float(value) * _SIZE_UNITS.get(unit, 0)
+    return {"total_bytes": round(total_bytes)}
+
+
+def parse_updates(raw: str) -> int:
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return 0
 
 
 def parse_ping(raw: str) -> float | None:

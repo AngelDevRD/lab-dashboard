@@ -66,6 +66,10 @@
     memBar.style.width = `${memPct}%`;
     memBar.className = `bar-fill mem-bar ${barClass(memPct)}`;
     card.querySelector(".mem-detail").textContent = `${bytesFmt(s.mem?.used)} / ${bytesFmt(s.mem?.total)}`;
+    const swap = s.mem?.swap;
+    card.querySelector(".swap-detail").textContent = swap && swap.total
+      ? `Swap: ${bytesFmt(swap.used)} / ${bytesFmt(swap.total)} (${swap.percent}%)`
+      : "Swap: sin uso";
 
     const diskPct = s.disk?.percent ?? 0;
     card.querySelector(".disk-percent").textContent = `${diskPct}%`;
@@ -77,11 +81,19 @@
     card.querySelector(".net-ip").textContent = s.net?.ip || "--";
     card.querySelector(".net-down").textContent = bpsFmt(s.net?.download_bps);
     card.querySelector(".net-up").textContent = bpsFmt(s.net?.upload_bps);
+    card.querySelector(".daily-traffic").textContent =
+      `Hoy: ↓ ${bytesFmt(s.net?.daily_download_bytes)} ↑ ${bytesFmt(s.net?.daily_upload_bytes)}`;
 
     const docker = s.docker || {};
     card.querySelector(".docker-summary").textContent = docker.available
       ? `${docker.running} corriendo / ${docker.stopped} detenidos`
       : "No disponible";
+    card.querySelector(".docker-disk").textContent = s.docker_disk
+      ? `${bytesFmt(s.docker_disk.total_bytes)} en disco`
+      : "";
+
+    card.querySelector(".updates-pending").textContent =
+      s.updates_pending > 0 ? `${s.updates_pending} pendientes` : "Al día";
 
     const svcGrid = card.querySelector(".services-grid");
     svcGrid.innerHTML = "";
