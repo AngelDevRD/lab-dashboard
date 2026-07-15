@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lab Dashboard</title>
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -15,33 +15,23 @@
     <div class="topbar-center" id="global-summary">
       <span class="pill" id="pill-online">-- online</span>
       <span class="pill pill-off" id="pill-offline">-- offline</span>
+      <span class="status-dot" id="internet-dot" title="Internet"></span>
     </div>
     <div class="topbar-right">
       <span id="clock" class="clock">--:--:--</span>
-      <span id="date" class="date">--</span>
       <button id="theme-toggle" class="icon-btn" title="Cambiar tema">🌙</button>
       <button id="fullscreen-toggle" class="icon-btn" title="Pantalla completa">⛶</button>
     </div>
   </header>
 
   <main>
-    <section class="card internet-card" id="internet-card">
-      <div class="card-header">
-        <h2>Internet</h2>
-        <span class="status-dot" id="internet-dot"></span>
-      </div>
-      <div class="internet-grid">
-        <div><span class="label">Ping Google</span><span class="value" id="ping-google">--</span></div>
-        <div><span class="label">Ping Cloudflare</span><span class="value" id="ping-cf">--</span></div>
-        <div><span class="label">Última caída</span><span class="value" id="last-outage">--</span></div>
-        <div><span class="label">Estado</span><span class="value" id="internet-state">--</span></div>
-      </div>
-    </section>
-
     <section id="server-grid" class="server-grid"></section>
 
-    <section class="card log-card">
-      <div class="card-header"><h2>Log de eventos</h2></div>
+    <section class="card log-card" id="log-card">
+      <div class="card-header" id="log-toggle">
+        <h2>Eventos</h2>
+        <span class="chevron">▾</span>
+      </div>
       <ul id="event-log" class="event-log"></ul>
     </section>
   </main>
@@ -55,69 +45,67 @@
         <h2 class="server-name">--</h2>
         <span class="status-dot"></span>
       </div>
-      <div class="server-meta">
-        <span class="uptime">Uptime: --</span>
-        <span class="last-update">Actualizado: --</span>
+
+      <div class="summary-row">
+        <div class="stat"><span class="stat-label">CPU</span><span class="stat-value cpu-percent">--%</span></div>
+        <div class="stat"><span class="stat-label">RAM</span><span class="stat-value mem-percent">--%</span></div>
+        <div class="stat"><span class="stat-label">Disco</span><span class="stat-value disk-percent">--%</span></div>
       </div>
 
-      <div class="metric">
-        <div class="metric-label"><span>CPU</span><span class="metric-value cpu-percent">--%</span></div>
-        <div class="bar"><div class="bar-fill cpu-bar"></div></div>
-        <div class="metric-sub">
-          <span class="cpu-temp">Temp: --</span>
-          <span class="cpu-load">Load: --</span>
-        </div>
+      <div class="summary-row">
+        <div class="stat"><span class="stat-label">Temp</span><span class="stat-value cpu-temp">--</span></div>
+        <div class="stat"><span class="stat-label">Energía</span><span class="stat-value power-value">--</span></div>
+        <div class="stat"><span class="stat-label">Docker</span><span class="stat-value docker-summary">--</span></div>
       </div>
 
-      <div class="metric">
-        <div class="metric-label"><span>RAM</span><span class="metric-value mem-percent">--%</span></div>
-        <div class="bar"><div class="bar-fill mem-bar"></div></div>
-        <div class="metric-sub mem-detail">-- / --</div>
-        <div class="metric-sub swap-detail">Swap: --</div>
-      </div>
-
-      <div class="metric">
-        <div class="metric-label"><span>Disco</span><span class="metric-value disk-percent">--%</span></div>
-        <div class="bar"><div class="bar-fill disk-bar"></div></div>
-        <div class="metric-sub disk-detail">-- / --</div>
-      </div>
-
-      <div class="metric-row">
-        <div class="mini-stat"><span class="mini-label">IP</span><span class="net-ip mini-value">--</span></div>
-        <div class="mini-stat"><span class="mini-label">↓</span><span class="net-down mini-value">--</span></div>
-        <div class="mini-stat"><span class="mini-label">↑</span><span class="net-up mini-value">--</span></div>
-      </div>
-      <div class="metric-sub daily-traffic">Hoy: ↓ -- ↑ --</div>
-
-      <div class="docker-block">
-        <span class="docker-label">Docker</span>
-        <span class="docker-summary">-- corriendo / -- detenidos</span>
-        <span class="docker-disk">--</span>
-      </div>
-
-      <div class="metric-row">
-        <div class="mini-stat"><span class="mini-label">Actualizaciones</span><span class="updates-pending mini-value">--</span></div>
-      </div>
-
-      <div class="services-grid"></div>
-
-      <div class="power-row">
-        <span class="power-label">Energía</span>
-        <span class="power-value">--</span>
-      </div>
-
-      <div class="procs-block">
-        <div class="procs-col">
-          <span class="procs-title">Top CPU</span>
-          <ul class="top-cpu-list"></ul>
-        </div>
-        <div class="procs-col">
-          <span class="procs-title">Top RAM</span>
-          <ul class="top-mem-list"></ul>
-        </div>
+      <div class="summary-row muted">
+        <span class="uptime">--</span>
+        <span class="latency">--</span>
       </div>
     </article>
   </template>
+
+  <div id="detail-overlay" class="detail-overlay hidden">
+    <div class="detail-panel">
+      <div class="detail-header">
+        <h2 id="detail-name">--</h2>
+        <button id="detail-close" class="icon-btn">✕</button>
+      </div>
+      <div class="detail-body">
+        <div class="detail-grid">
+          <div><span class="label">Uptime</span><span class="value" id="detail-uptime">--</span></div>
+          <div><span class="label">Load</span><span class="value" id="detail-load">--</span></div>
+          <div><span class="label">Latencia</span><span class="value" id="detail-latency">--</span></div>
+          <div><span class="label">IP</span><span class="value" id="detail-ip">--</span></div>
+          <div><span class="label">↓ / ↑</span><span class="value" id="detail-net">--</span></div>
+          <div><span class="label">Hoy</span><span class="value" id="detail-traffic">--</span></div>
+          <div><span class="label">RAM</span><span class="value" id="detail-mem">--</span></div>
+          <div><span class="label">Swap</span><span class="value" id="detail-swap">--</span></div>
+          <div><span class="label">Disco</span><span class="value" id="detail-disk">--</span></div>
+          <div><span class="label">Disco Docker</span><span class="value" id="detail-docker-disk">--</span></div>
+          <div><span class="label">Actualizaciones</span><span class="value" id="detail-updates">--</span></div>
+          <div><span class="label">Temp por núcleo</span><span class="value" id="detail-temp-cores">--</span></div>
+        </div>
+
+        <h3>Servicios</h3>
+        <div class="services-grid" id="detail-services"></div>
+
+        <h3>Contenedores Docker</h3>
+        <ul class="container-list" id="detail-containers"></ul>
+
+        <div class="procs-block">
+          <div class="procs-col">
+            <span class="procs-title">Top CPU</span>
+            <ul id="detail-top-cpu"></ul>
+          </div>
+          <div class="procs-col">
+            <span class="procs-title">Top RAM</span>
+            <ul id="detail-top-mem"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/js/app.js"></script>
 </body>

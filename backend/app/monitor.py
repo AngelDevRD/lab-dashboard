@@ -23,6 +23,7 @@ class Monitor:
         self._daily_baseline: dict[str, tuple[str, int, int]] = (
             {}
         )  # host -> (date, rx0, tx0)
+        self._server_order: list[str] = []
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
         self._task: asyncio.Task | None = None
@@ -115,6 +116,7 @@ class Monitor:
     async def _loop(self) -> None:
         while self._running:
             servers = config.load_servers()
+            self._server_order = [s["host"] for s in servers]
             await asyncio.gather(*(self._poll_server(s) for s in servers))
             await self._poll_internet(servers)
             await asyncio.sleep(config.POLL_INTERVAL)
@@ -136,7 +138,10 @@ class Monitor:
         pool.close_all()
 
     def snapshot(self) -> dict:
-        servers = list(self.servers_status.values())
+        ordered_hosts = self._server_order or list(self.servers_status.keys())
+        servers = [
+            self.servers_status[h] for h in ordered_hosts if h in self.servers_status
+        ]
         online_count = sum(1 for s in servers if s.get("online"))
         return {
             "servers": servers,

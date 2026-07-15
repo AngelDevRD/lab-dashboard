@@ -3,8 +3,10 @@
 
   const grid = document.getElementById("server-grid");
   const template = document.getElementById("server-card-template");
-  const cardEls = new Map();
+  const cards = new Map(); // host -> { el, refs, last: {} }
   const prevOnline = new Map();
+  let selectedHost = null;
+  let latestServers = new Map(); // host -> server data, for the open detail panel
 
   const bytesFmt = (n) => {
     if (n == null) return "--";
@@ -16,103 +18,102 @@
   };
   const bpsFmt = (n) => `${bytesFmt(n)}/s`;
 
-  const barClass = (pct) => (pct >= 85 ? "high" : pct >= 60 ? "mid" : "");
+  // Only touch the DOM when a value actually changed - avoids reflow/repaint
+  // on every poll cycle for numbers that didn't move.
+  function setText(refs, key, text) {
+    if (refs.last[key] === text) return;
+    refs.last[key] = text;
+    refs.el[key].textContent = text;
+  }
+
+  function statusLevel(s) {
+    if (!s.online) return "red";
+    const pct = [s.cpu?.percent, s.mem?.percent, s.disk?.percent].filter((v) => v != null);
+    if (pct.some((v) => v >= 90)) return "red";
+    if (pct.some((v) => v >= 70)) return "yellow";
+    return "green";
+  }
 
   function ensureCard(host) {
-    if (cardEls.has(host)) return cardEls.get(host);
-    const node = template.content.firstElementChild.cloneNode(true);
-    node.dataset.host = host;
-    grid.appendChild(node);
-    cardEls.set(host, node);
-    return node;
+    if (cards.has(host)) return cards.get(host);
+    const el = template.content.firstElementChild.cloneNode(true);
+    el.dataset.host = host;
+    el.addEventListener("click", () => openDetail(host));
+    grid.appendChild(el);
+
+    const refs = {
+      el: {
+        name: el.querySelector(".server-name"),
+        dot: el.querySelector(".status-dot"),
+        cpu: el.querySelector(".cpu-percent"),
+        mem: el.querySelector(".mem-percent"),
+        disk: el.querySelector(".disk-percent"),
+        temp: el.querySelector(".cpu-temp"),
+        power: el.querySelector(".power-value"),
+        docker: el.querySelector(".docker-summary"),
+        uptime: el.querySelector(".uptime"),
+        latency: el.querySelector(".latency"),
+      },
+      last: {},
+      card: el,
+    };
+    cards.set(host, refs);
+    return refs;
   }
 
   function renderServer(s) {
-    const card = ensureCard(s.host);
-    card.classList.toggle("offline", !s.online);
+    latestServers.set(s.host, s);
+    const refs = ensureCard(s.host);
+    const level = statusLevel(s);
+    refs.card.classList.toggle("offline", !s.online);
+    refs.card.classList.toggle("selected", s.host === selectedHost);
+    if (refs.last.level !== level) {
+      refs.card.classList.remove("lvl-green", "lvl-yellow", "lvl-red");
+      refs.card.classList.add(`lvl-${level}`);
+      refs.last.level = level;
+    }
 
-    const dot = card.querySelector(".status-dot");
-    card.querySelector(".server-name").textContent = s.name;
+    setText(refs, "name", s.name);
 
     if (!s.online) {
-      dot.className = "status-dot offline";
-      card.querySelector(".uptime").textContent = "Offline";
-      card.querySelector(".last-update").textContent = new Date(s.last_update * 1000).toLocaleTimeString();
+      refs.el.dot.className = "status-dot offline";
+      setText(refs, "cpu", "--%");
+      setText(refs, "mem", "--%");
+      setText(refs, "disk", "--%");
+      setText(refs, "temp", "--");
+      setText(refs, "power", "--");
+      setText(refs, "docker", "--");
+      setText(refs, "uptime", "Offline");
+      setText(refs, "latency", "");
       flagAlert(s, false);
+      if (s.host === selectedHost) renderDetail(s);
       return;
     }
 
-    let warn = false;
-    for (const active of Object.values(s.services || {})) {
-      if (!active) warn = true;
+    const dotClass = level === "red" ? "warn" : level === "yellow" ? "warn" : "online";
+    const dotTarget = `status-dot ${dotClass}`;
+    if (refs.last.dot !== dotTarget) {
+      refs.el.dot.className = dotTarget;
+      refs.last.dot = dotTarget;
     }
-    dot.className = warn ? "status-dot warn" : "status-dot online";
-    card.classList.toggle("warn", warn);
 
-    card.querySelector(".uptime").textContent = `Uptime: ${s.uptime?.pretty || "--"}`;
-    card.querySelector(".last-update").textContent = `Actualizado: ${new Date(s.last_update * 1000).toLocaleTimeString()}`;
-
-    const cpuPct = s.cpu?.percent ?? 0;
-    card.querySelector(".cpu-percent").textContent = `${cpuPct}%`;
-    const cpuBar = card.querySelector(".cpu-bar");
-    cpuBar.style.width = `${cpuPct}%`;
-    cpuBar.className = `bar-fill cpu-bar ${barClass(cpuPct)}`;
-    card.querySelector(".cpu-temp").textContent = `Temp: ${s.cpu?.temp != null ? s.cpu.temp + "°C" : "No disponible"}`;
-    card.querySelector(".cpu-load").textContent = `Load: ${s.load?.load1 ?? "--"}`;
-
-    const memPct = s.mem?.percent ?? 0;
-    card.querySelector(".mem-percent").textContent = `${memPct}%`;
-    const memBar = card.querySelector(".mem-bar");
-    memBar.style.width = `${memPct}%`;
-    memBar.className = `bar-fill mem-bar ${barClass(memPct)}`;
-    card.querySelector(".mem-detail").textContent = `${bytesFmt(s.mem?.used)} / ${bytesFmt(s.mem?.total)}`;
-    const swap = s.mem?.swap;
-    card.querySelector(".swap-detail").textContent = swap && swap.total
-      ? `Swap: ${bytesFmt(swap.used)} / ${bytesFmt(swap.total)} (${swap.percent}%)`
-      : "Swap: sin uso";
-
-    const diskPct = s.disk?.percent ?? 0;
-    card.querySelector(".disk-percent").textContent = `${diskPct}%`;
-    const diskBar = card.querySelector(".disk-bar");
-    diskBar.style.width = `${diskPct}%`;
-    diskBar.className = `bar-fill disk-bar ${barClass(diskPct)}`;
-    card.querySelector(".disk-detail").textContent = `${bytesFmt(s.disk?.used)} / ${bytesFmt(s.disk?.total)}`;
-
-    card.querySelector(".net-ip").textContent = s.net?.ip || "--";
-    card.querySelector(".net-down").textContent = bpsFmt(s.net?.download_bps);
-    card.querySelector(".net-up").textContent = bpsFmt(s.net?.upload_bps);
-    card.querySelector(".daily-traffic").textContent =
-      `Hoy: ↓ ${bytesFmt(s.net?.daily_download_bytes)} ↑ ${bytesFmt(s.net?.daily_upload_bytes)}`;
-
-    const docker = s.docker || {};
-    card.querySelector(".docker-summary").textContent = docker.available
-      ? `${docker.running} corriendo / ${docker.stopped} detenidos`
-      : "No disponible";
-    card.querySelector(".docker-disk").textContent = s.docker_disk
-      ? `${bytesFmt(s.docker_disk.total_bytes)} en disco`
-      : "";
-
-    card.querySelector(".updates-pending").textContent =
-      s.updates_pending > 0 ? `${s.updates_pending} pendientes` : "Al día";
-
-    const svcGrid = card.querySelector(".services-grid");
-    svcGrid.innerHTML = "";
-    for (const [name, active] of Object.entries(s.services || {})) {
-      const chip = document.createElement("span");
-      chip.className = `service-chip${active ? "" : " down"}`;
-      chip.textContent = name;
-      svcGrid.appendChild(chip);
-    }
+    setText(refs, "cpu", `${s.cpu?.percent ?? 0}%`);
+    setText(refs, "mem", `${s.mem?.percent ?? 0}%`);
+    setText(refs, "disk", `${s.disk?.percent ?? 0}%`);
+    setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
     const power = s.power || {};
-    card.querySelector(".power-value").textContent = power.available
-      ? `${power.percent ?? "--"}% · ${power.status || "--"}${power.voltage ? " · " + power.voltage + "V" : ""}`
-      : "No disponible";
+    setText(refs, "power", power.available ? `${power.percent ?? "--"}%` : "--");
 
-    renderProcList(card.querySelector(".top-cpu-list"), s.top_cpu, "%");
-    renderProcList(card.querySelector(".top-mem-list"), s.top_mem, "%");
+    const docker = s.docker || {};
+    setText(refs, "docker", docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--");
 
-    flagAlert(s, warn);
+    setText(refs, "uptime", s.uptime?.pretty || "--");
+    setText(refs, "latency", s.latency_ms != null ? `${s.latency_ms} ms` : "");
+
+    flagAlert(s, level !== "green");
+
+    if (s.host === selectedHost) renderDetail(s);
   }
 
   function renderProcList(ul, procs, suffix) {
@@ -122,6 +123,72 @@
       li.innerHTML = `<span>${p.name}</span><span>${p.value}${suffix}</span>`;
       ul.appendChild(li);
     }
+  }
+
+  function openDetail(host) {
+    selectedHost = host;
+    document.getElementById("detail-overlay").classList.remove("hidden");
+    const s = latestServers.get(host);
+    if (s) renderDetail(s);
+    for (const [h, refs] of cards) refs.card.classList.toggle("selected", h === host);
+  }
+
+  function closeDetail() {
+    selectedHost = null;
+    document.getElementById("detail-overlay").classList.add("hidden");
+    for (const refs of cards.values()) refs.card.classList.remove("selected");
+  }
+
+  function renderDetail(s) {
+    document.getElementById("detail-name").textContent = s.name;
+    if (!s.online) return;
+    document.getElementById("detail-uptime").textContent = s.uptime?.pretty || "--";
+    document.getElementById("detail-load").textContent =
+      `${s.load?.load1 ?? "--"} / ${s.load?.load5 ?? "--"} / ${s.load?.load15 ?? "--"}`;
+    document.getElementById("detail-latency").textContent = s.latency_ms != null ? `${s.latency_ms} ms` : "--";
+    document.getElementById("detail-ip").textContent = s.net?.ip || "--";
+    document.getElementById("detail-net").textContent = `${bpsFmt(s.net?.download_bps)} / ${bpsFmt(s.net?.upload_bps)}`;
+    document.getElementById("detail-traffic").textContent =
+      `↓ ${bytesFmt(s.net?.daily_download_bytes)} ↑ ${bytesFmt(s.net?.daily_upload_bytes)}`;
+    document.getElementById("detail-mem").textContent = `${bytesFmt(s.mem?.used)} / ${bytesFmt(s.mem?.total)}`;
+    const swap = s.mem?.swap;
+    document.getElementById("detail-swap").textContent =
+      swap && swap.total ? `${bytesFmt(swap.used)} / ${bytesFmt(swap.total)} (${swap.percent}%)` : "sin uso";
+    document.getElementById("detail-disk").textContent = `${bytesFmt(s.disk?.used)} / ${bytesFmt(s.disk?.total)}`;
+    document.getElementById("detail-docker-disk").textContent = s.docker_disk
+      ? bytesFmt(s.docker_disk.total_bytes)
+      : "--";
+    document.getElementById("detail-updates").textContent =
+      s.updates_pending > 0 ? `${s.updates_pending} pendientes` : "Al día";
+    document.getElementById("detail-temp-cores").textContent =
+      s.cpu?.temp_per_core?.length ? s.cpu.temp_per_core.map((t) => `${t}°C`).join(" · ") : "--";
+
+    const svcGrid = document.getElementById("detail-services");
+    svcGrid.innerHTML = "";
+    for (const [name, active] of Object.entries(s.services || {})) {
+      const chip = document.createElement("span");
+      chip.className = `service-chip${active ? "" : " down"}`;
+      chip.textContent = name;
+      svcGrid.appendChild(chip);
+    }
+
+    const containerList = document.getElementById("detail-containers");
+    containerList.innerHTML = "";
+    const docker = s.docker || {};
+    if (!docker.available) {
+      containerList.innerHTML = "<li>No disponible</li>";
+    } else if (!docker.containers.length) {
+      containerList.innerHTML = "<li>Sin contenedores</li>";
+    } else {
+      for (const c of docker.containers) {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${c.name}</span><span class="${c.state === "running" ? "" : "down"}">${c.status}</span>`;
+        containerList.appendChild(li);
+      }
+    }
+
+    renderProcList(document.getElementById("detail-top-cpu"), s.top_cpu, "%");
+    renderProcList(document.getElementById("detail-top-mem"), s.top_mem, "%");
   }
 
   function flagAlert(s, warn) {
@@ -140,22 +207,24 @@
     sound?.play().catch(() => {});
   }
 
+  let lastSummary = "";
   function renderSummary(data) {
+    const text = `${data.summary.online}|${data.summary.offline}`;
+    if (text === lastSummary) return;
+    lastSummary = text;
     document.getElementById("pill-online").textContent = `${data.summary.online} online`;
     document.getElementById("pill-offline").textContent = `${data.summary.offline} offline`;
   }
 
+  let lastInternet = null;
   function renderInternet(net) {
-    const card = document.getElementById("internet-card");
+    if (lastInternet === net.online) return;
+    lastInternet = net.online;
     const dot = document.getElementById("internet-dot");
-    card.classList.toggle("down", !net.online);
     dot.className = `status-dot ${net.online ? "online" : "offline"}`;
-    document.getElementById("ping-google").textContent = net.google_ms != null ? `${net.google_ms} ms` : "Sin respuesta";
-    document.getElementById("ping-cf").textContent = net.cloudflare_ms != null ? `${net.cloudflare_ms} ms` : "Sin respuesta";
-    document.getElementById("internet-state").textContent = net.online ? "Conectado" : "Sin conexión";
-    document.getElementById("last-outage").textContent = net.last_outage
-      ? new Date(net.last_outage * 1000).toLocaleString()
-      : "Sin registros";
+    dot.title = net.online
+      ? `Internet OK (google ${net.google_ms ?? "--"}ms, cloudflare ${net.cloudflare_ms ?? "--"}ms)`
+      : "Sin conexión a internet";
 
     const banner = document.getElementById("alert-banner");
     if (!net.online) {
@@ -166,7 +235,11 @@
     }
   }
 
+  let lastEventsKey = "";
   function renderEvents(events) {
+    const key = events.length ? events[0].time + events[0].kind : "";
+    if (key === lastEventsKey) return;
+    lastEventsKey = key;
     const ul = document.getElementById("event-log");
     ul.innerHTML = "";
     for (const ev of events) {
@@ -220,13 +293,22 @@
 
   connectWS();
 
-  // --- Clock ---
+  // --- Detail panel open/close ---
+  document.getElementById("detail-close").addEventListener("click", closeDetail);
+  document.getElementById("detail-overlay").addEventListener("click", (ev) => {
+    if (ev.target.id === "detail-overlay") closeDetail();
+  });
+
+  // --- Events log collapse (saves vertical space by default) ---
+  const logCard = document.getElementById("log-card");
+  document.getElementById("log-toggle").addEventListener("click", () => {
+    logCard.classList.toggle("collapsed");
+  });
+  logCard.classList.add("collapsed");
+
+  // --- Clock (no need for a full date line, saves a text node + width) ---
   function tickClock() {
-    const now = new Date();
-    document.getElementById("clock").textContent = now.toLocaleTimeString();
-    document.getElementById("date").textContent = now.toLocaleDateString(undefined, {
-      weekday: "short", year: "numeric", month: "short", day: "numeric",
-    });
+    document.getElementById("clock").textContent = new Date().toLocaleTimeString();
   }
   tickClock();
   setInterval(tickClock, 1000);

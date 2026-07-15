@@ -9,7 +9,9 @@ from .commands import COMMANDS, INTERNET_COMMANDS
 async def collect_server(server: dict, conn: SSHConnection) -> dict:
     host = server["host"]
     now = time.time()
+    started = time.monotonic()
     results = await conn.run_many(COMMANDS)
+    latency_ms = round((time.monotonic() - started) * 1000)
 
     online = results.get("hostname", (False, ""))[0]
     if not online:
@@ -30,6 +32,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "host": host,
         "online": True,
         "last_update": now,
+        "latency_ms": latency_ms,
         "uptime": parsers.parse_uptime(out("uptime")),
         "load": parsers.parse_loadavg(out("loadavg")),
         "cpu": {
