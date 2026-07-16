@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from . import config
-from .models import HealthResponse
+from .models import HealthResponse, StatusResponse
 from .monitor import monitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -114,10 +114,10 @@ app.add_middleware(
 )
 
 
-@app.get("/api/status")
+@app.get("/api/status", response_model=StatusResponse)
 @limiter.limit("30/second")
 async def get_status(request):
-    return monitor.snapshot()
+    return StatusResponse(**monitor.snapshot())
 
 
 @app.get("/api/health", response_model=HealthResponse)
