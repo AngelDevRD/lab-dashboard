@@ -55,7 +55,7 @@ fi
 BEFORE=$(git rev-parse HEAD)
 log "Commit actual: $BEFORE"
 
-# --- 3. Fetch + checkout + pull (fast-forward only) ---
+# --- 3. Fetch + checkout + merge ---
 log "Actualizando desde origin..."
 git fetch origin 2>&1 | tee -a "$LOG_FILE"
 
@@ -65,9 +65,17 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
   git checkout main 2>&1 | tee -a "$LOG_FILE"
 fi
 
-if ! git pull --ff-only origin main 2>&1 | tee -a "$LOG_FILE"; then
-  log "ERROR: git pull --ff-only falló. No se puede continuar."
-  exit 1
+# Intentar fast-forward; si falla (divergencia), hacer merge automático
+if git merge --ff-only origin/main 2>&1 | tee -a "$LOG_FILE"; then
+  log "Fast-forward exitoso."
+else
+  log "WARN: Fast-forward no posible (commits locales presentes). Haciendo merge automático..."
+  if git merge origin/main --no-edit 2>&1 | tee -a "$LOG_FILE"; then
+    log "Merge automático completado."
+  else
+    log "ERROR: Merge con origin/main falló. Abortando."
+    exit 1
+  fi
 fi
 
 AFTER=$(git rev-parse HEAD)
