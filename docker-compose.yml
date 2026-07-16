@@ -2,7 +2,7 @@ services:
   lab-dashboard:
     build: .
     container_name: lab-dashboard
-    restart: always
+    restart: unless-stopped
     ports:
       - "8600:8600"
     env_file:
@@ -12,7 +12,7 @@ services:
     volumes:
       - ./backend/servers.json:/app/servers.json
       - ./logs:/logs
-      - ~/.ssh:/app/.ssh:ro
+      - ./config/ssh:/app/.ssh:ro
       - ./config:/app/config
     labels:
       - "app=lab-dashboard"
