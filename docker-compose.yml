@@ -11,11 +11,9 @@ services:
       - SSH_KEY_PATH=/app/.ssh/id_ed25519
     volumes:
       - ./backend/servers.json:/app/servers.json
-      # Si no hay servers.json real, usa el de ejemplo:
-      # - ./backend/servers.example.json:/app/servers.json
       - ./logs:/logs
       - ./config/ssh:/app/.ssh:ro
-      - ./config:/app/config
+      - ./config:/config:ro
     labels:
       - "app=lab-dashboard"
       - "description=Lab Dashboard - FastAPI monitoring"
