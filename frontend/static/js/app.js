@@ -250,12 +250,23 @@
   }
 
   let lastAlertAt = 0;
+  let _alertCtx = null;
   function playAlert() {
     const now = Date.now();
     if (now - lastAlertAt < 15000) return;
     lastAlertAt = now;
-    const sound = document.getElementById("alert-sound");
-    sound?.play().catch(() => {});
+    try {
+      if (!_alertCtx) _alertCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = _alertCtx.createOscillator();
+      const gain = _alertCtx.createGain();
+      osc.connect(gain);
+      gain.connect(_alertCtx.destination);
+      osc.frequency.value = 800;
+      gain.gain.setValueAtTime(0.15, _alertCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _alertCtx.currentTime + 0.3);
+      osc.start(_alertCtx.currentTime);
+      osc.stop(_alertCtx.currentTime + 0.3);
+    } catch (_) { /* Web Audio no disponible */ }
   }
 
   let lastSummary = "";
@@ -345,7 +356,12 @@
       try {
         const res = await fetch("/api/status");
         render(await res.json());
-      } catch (_) { /* server unreachable, keep retrying */ }
+      } catch (_) {
+        if (!startFallback._log || Date.now() - startFallback._log > 30000) {
+          startFallback._log = Date.now();
+          console.warn("Polling fallback: servidor no alcanzable, reintentando...");
+        }
+      }
     }, 2000);
   }
 
