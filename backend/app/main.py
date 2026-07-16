@@ -9,6 +9,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from . import config
 from .monitor import monitor
@@ -35,7 +38,7 @@ class ConnectionManager:
         for ws in self.active:
             try:
                 await ws.send_json(payload)
-            except Exception:  # noqa: BLE001
+            except (WebSocketDisconnect, RuntimeError, ConnectionError):
                 dead.append(ws)
         for ws in dead:
             self.disconnect(ws)
@@ -52,7 +55,7 @@ async def _broadcast_loop() -> None:
 
 
 def _sd_notify(state: str) -> None:
-    """Minimal sd_notify client, no external dependency. No-op outside systemd Type=notify."""
+    """Compatible con systemd Type=notify y Docker. No-op si NOTIFY_SOCKET no está definido."""
     addr = os.environ.get("NOTIFY_SOCKET")
     if not addr:
         return
@@ -69,8 +72,7 @@ def _sd_notify(state: str) -> None:
 
 
 async def _watchdog_loop() -> None:
-    """Pings systemd's watchdog at half the configured WatchdogSec, so a hung
-    event loop (not just a dead process) triggers Restart=always."""
+    """Compatible con systemd WatchdogSec y Docker. No-op si WATCHDOG_USEC no está definido."""
     usec = int(os.environ.get("WATCHDOG_USEC", "0"))
     if usec <= 0:
         return
@@ -92,18 +94,23 @@ async def lifespan(app: FastAPI):
     await monitor.stop()
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="Lab Dashboard", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 @app.get("/api/status")
-async def get_status():
+@limiter.limit("30/second")
+async def get_status(request):
     return monitor.snapshot()
 
 

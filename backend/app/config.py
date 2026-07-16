@@ -1,8 +1,12 @@
 import json
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("dashboard")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -16,22 +20,39 @@ SSH_BACKOFF_BASE = float(os.getenv("SSH_BACKOFF_BASE", "2"))
 SSH_BACKOFF_MAX = float(os.getenv("SSH_BACKOFF_MAX", "60"))
 INTERNET_CHECK_TARGETS = ["8.8.8.8", "1.1.1.1"]
 LOG_FILE = Path(os.getenv("LOG_FILE", BASE_DIR.parent / "logs" / "events.log"))
-KNOWN_SERVICES = [
-    "ssh",
-    "docker",
-    "tailscaled",
-    "nginx",
-    "fastapi",
-    "postgresql",
-    "redis-server",
-    "portainer",
-    "uptime-kuma",
+
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:8600,http://127.0.0.1:8600").split(",")
+    if o.strip()
 ]
+
+KNOWN_SERVICES = [
+    s.strip()
+    for s in os.getenv(
+        "KNOWN_SERVICES",
+        "ssh,docker,tailscaled,nginx,fastapi,postgresql,redis-server,portainer,uptime-kuma",
+    ).split(",")
+    if s.strip()
+]
+
+
+class ServerConfig(BaseModel):
+    name: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    ssh_port: int = Field(default=22, ge=1, le=65535)
+    ssh_user: str = Field(default="ubuntu", min_length=1)
 
 
 def load_servers() -> list[dict]:
     if not SERVERS_FILE.exists():
         return []
-    with open(SERVERS_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("servers", [])
+    try:
+        with open(SERVERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        raw_list = data.get("servers", [])
+        validated = [ServerConfig(**s) for s in raw_list]
+        return [s.model_dump() for s in validated]
+    except Exception as exc:
+        logger.error("Error loading %s: %s", SERVERS_FILE, exc)
+        return []

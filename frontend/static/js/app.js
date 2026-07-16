@@ -117,10 +117,15 @@
   }
 
   function renderProcList(ul, procs, suffix) {
-    ul.innerHTML = "";
+    ul.textContent = "";
     for (const p of procs || []) {
       const li = document.createElement("li");
-      li.innerHTML = `<span>${p.name}</span><span>${p.value}${suffix}</span>`;
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = p.name;
+      const valSpan = document.createElement("span");
+      valSpan.textContent = `${p.value}${suffix}`;
+      li.appendChild(nameSpan);
+      li.appendChild(valSpan);
       ul.appendChild(li);
     }
   }
@@ -173,16 +178,26 @@
     }
 
     const containerList = document.getElementById("detail-containers");
-    containerList.innerHTML = "";
+    containerList.textContent = "";
     const docker = s.docker || {};
     if (!docker.available) {
-      containerList.innerHTML = "<li>No disponible</li>";
+      const li = document.createElement("li");
+      li.textContent = "No disponible";
+      containerList.appendChild(li);
     } else if (!docker.containers.length) {
-      containerList.innerHTML = "<li>Sin contenedores</li>";
+      const li = document.createElement("li");
+      li.textContent = "Sin contenedores";
+      containerList.appendChild(li);
     } else {
       for (const c of docker.containers) {
         const li = document.createElement("li");
-        li.innerHTML = `<span>${c.name}</span><span class="${c.state === "running" ? "" : "down"}">${c.status}</span>`;
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = c.name;
+        const valSpan = document.createElement("span");
+        valSpan.textContent = c.status;
+        if (c.state !== "running") valSpan.className = "down";
+        li.appendChild(nameSpan);
+        li.appendChild(valSpan);
         containerList.appendChild(li);
       }
     }
@@ -241,13 +256,19 @@
     if (key === lastEventsKey) return;
     lastEventsKey = key;
     const ul = document.getElementById("event-log");
-    ul.innerHTML = "";
+    ul.textContent = "";
     for (const ev of events) {
       const li = document.createElement("li");
       const kind = ev.kind.includes("down") ? "kind-down" : ev.kind.includes("up") ? "kind-up" : "";
       li.className = kind;
       const time = new Date(ev.time * 1000).toLocaleTimeString();
-      li.innerHTML = `<span class="ev-time">${time}</span><span>${ev.message}</span>`;
+      const timeSpan = document.createElement("span");
+      timeSpan.className = "ev-time";
+      timeSpan.textContent = time;
+      const msgSpan = document.createElement("span");
+      msgSpan.textContent = ev.message;
+      li.appendChild(timeSpan);
+      li.appendChild(msgSpan);
       ul.appendChild(li);
     }
   }
