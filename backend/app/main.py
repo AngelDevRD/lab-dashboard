@@ -5,15 +5,16 @@ import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from . import config
+from .models import HealthResponse
 from .monitor import monitor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -55,7 +56,6 @@ async def _broadcast_loop() -> None:
 
 
 def _sd_notify(state: str) -> None:
-    """Compatible con systemd Type=notify y Docker. No-op si NOTIFY_SOCKET no está definido."""
     addr = os.environ.get("NOTIFY_SOCKET")
     if not addr:
         return
@@ -72,7 +72,6 @@ def _sd_notify(state: str) -> None:
 
 
 async def _watchdog_loop() -> None:
-    """Compatible con systemd WatchdogSec y Docker. No-op si WATCHDOG_USEC no está definido."""
     usec = int(os.environ.get("WATCHDOG_USEC", "0"))
     if usec <= 0:
         return
@@ -100,6 +99,13 @@ app = FastAPI(title="Lab Dashboard", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -114,9 +120,9 @@ async def get_status(request):
     return monitor.snapshot()
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 async def health():
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
 @app.websocket("/ws")

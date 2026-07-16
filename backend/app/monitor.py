@@ -100,7 +100,8 @@ class Monitor:
         conn = pool.get(online_server)
         try:
             status = await collect_internet(conn)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — error de conectividad externa, no fatal
+            logger.warning("collect_internet falló: %s", exc)
             status = {"google_ms": None, "cloudflare_ms": None, "online": False}
         self.internet_status = status
         if status["online"]:
