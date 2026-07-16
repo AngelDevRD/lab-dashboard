@@ -256,6 +256,13 @@
     renderSummary(data);
     renderInternet(data.internet);
     renderEvents(data.events);
+    // Limpiar cualquier clase servers-N anterior y aplicar la correcta
+    const count = data.servers ? data.servers.length : 0;
+    grid.classList.remove(
+      "servers-1", "servers-2", "servers-3",
+      "servers-4", "servers-5", "servers-6"
+    );
+    if (count >= 1 && count <= 6) grid.classList.add(`servers-${count}`);
     for (const s of data.servers) renderServer(s);
   }
 
@@ -333,4 +340,17 @@
       document.exitFullscreen?.();
     }
   });
+
+  // --- Detección de orientación: aviso "Gire la tablet" en portrait ---
+  const rotateOverlay = document.createElement("div");
+  rotateOverlay.id = "rotate-overlay";
+  rotateOverlay.innerHTML = "&#x21BA; Gire la tablet";
+  document.body.appendChild(rotateOverlay);
+
+  function checkOrientation() {
+    const isLandscape = window.innerWidth > window.innerHeight;
+    rotateOverlay.classList.toggle("visible", !isLandscape);
+  }
+  checkOrientation();
+  window.addEventListener("resize", checkOrientation);
 })();

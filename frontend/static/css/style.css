@@ -10,6 +10,10 @@
   --warn: #fbbf24;
   --bad: #f87171;
   --radius: 10px;
+  --card-padding: clamp(8px, 1.5vh, 12px);
+  --font-title: clamp(.95rem, 1.4vw, 1.3rem);
+  --font-value: clamp(.85rem, 1.2vw, 1.1rem);
+  --font-label: clamp(.65rem, .9vw, .82rem);
 }
 
 :root[data-theme="light"] {
@@ -43,7 +47,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
+  padding: 6px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
   flex: 0 0 auto;
@@ -90,7 +94,7 @@ main {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: var(--card-padding);
 }
 
 .card-header {
@@ -108,41 +112,52 @@ main {
 .status-dot.offline { background: var(--bad); }
 .status-dot.warn { background: var(--warn); }
 
-/* Server grid: fills available width, up to 4 columns side by side in
-   landscape so 1-4 servers need zero vertical scrolling. More than 4 wraps
-   to a second row and the page scrolls (deliberately, per spec). */
+/* Server grid: default rules (7+ servers layout with AutoFit + Scroll) */
 .server-grid {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  grid-auto-rows: 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-auto-rows: minmax(180px, 1fr);
+  gap: 12px;
   overflow-y: auto;
+  height: 100%;
+  align-content: stretch;
+  max-width: 1700px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .server-card {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  justify-content: space-between;
+  gap: clamp(6px, 1.5vh, 12px);
   border-left: 3px solid var(--panel-border);
   user-select: none;
+  height: 100%;
+  flex: 1;
+  min-height: 220px;
+  transition: background .2s, border-color .2s, transform .15s;
 }
+.server-card:active { transform: scale(.98); }
 .server-card.lvl-green { border-left-color: var(--ok); }
 .server-card.lvl-yellow { border-left-color: var(--warn); }
 .server-card.lvl-red { border-left-color: var(--bad); }
 .server-card.selected { border-color: var(--accent); border-left-color: var(--accent); }
-.server-card .server-name { font-size: 0.95rem; }
+.server-card .server-name { font-size: var(--font-title); }
 
 .summary-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: clamp(4px, 1vh, 8px);
+  flex: 1 1 auto;
 }
 .summary-row.muted {
   grid-template-columns: 1fr 1fr;
-  font-size: 0.7rem;
+  flex: 0 0 auto;
+  font-size: var(--font-label);
   color: var(--text-2);
   padding-top: 4px;
   border-top: 1px solid var(--panel-border);
@@ -152,11 +167,66 @@ main {
 .stat {
   background: rgba(255, 255, 255, 0.03);
   border-radius: 8px;
-  padding: 4px 6px;
+  padding: clamp(4px, 1vh, 10px) 6px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(2px, 0.5vh, 6px);
+  height: 100%;
+  flex: 1;
 }
-.stat-label { display: block; font-size: 0.62rem; color: var(--text-2); }
-.stat-value { display: block; font-size: 0.95rem; font-weight: 700; }
+.stat-label { display: block; font-size: var(--font-label); color: var(--text-2); }
+.stat-value { display: block; font-size: var(--font-value); font-weight: 700; }
+
+/* Layout por conteo de servidores (clase inyectada por JS). Sin scroll para ≤6 servidores. */
+.server-grid[class*="servers-"] {
+  grid-auto-rows: unset;
+  overflow-y: hidden;
+}
+
+/* 1 servidor → tarjeta enorme centrada */
+.server-grid.servers-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.server-grid.servers-1 .server-card {
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 2 servidores → siempre horizontal (la tablet SIEMPRE estará en landscape) */
+.server-grid.servers-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+
+/* 3 servidores → siempre 3 columnas en landscape */
+.server-grid.servers-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+
+/* 4 servidores → 2×2 */
+.server-grid.servers-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, 1fr);
+}
+
+/* 5 servidores → Fila 1: 3 cols (span 2), Fila 2: 2 cols (span 3) */
+.server-grid.servers-5 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(2, 1fr);
+}
+.server-grid.servers-5 > :nth-child(-n+3) { grid-column: span 2; }
+.server-grid.servers-5 > :nth-child(n+4)  { grid-column: span 3; }
+
+/* 6 servidores → 3×2 */
+.server-grid.servers-6 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, 1fr);
+}
 
 /* --- Detail overlay --- */
 .detail-overlay {
@@ -283,7 +353,7 @@ main {
   50% { opacity: 0.6; }
 }
 
-@media (max-width: 1280px) {
+@media (orientation: landscape) {
 
   /* 1. Layout general y Header */
   .topbar {
@@ -330,48 +400,6 @@ main {
     gap: 4px;
   }
 
-  /* 2. Grid de Servidores */
-  .server-grid {
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    grid-auto-rows: max-content;
-    gap: 4px;
-  }
-
-  /* 3. Server Cards */
-  .card {
-    padding: 4px 6px;
-  }
-
-  .server-card {
-    gap: 3px;
-    border-left-width: 2px;
-  }
-
-  .server-card .server-name {
-    font-size: 0.78rem;
-  }
-
-  .summary-row {
-    gap: 3px;
-  }
-
-  .summary-row.muted {
-    font-size: 0.55rem;
-    padding-top: 2px;
-  }
-
-  .stat {
-    padding: 2px;
-    border-radius: 4px;
-  }
-
-  .stat-label {
-    font-size: 0.5rem;
-  }
-
-  .stat-value {
-    font-size: 0.72rem;
-  }
 
   /* 4. Eventos (oculto por defecto en pantallas medianas/pequeñas) */
   .log-card {
@@ -472,4 +500,23 @@ main {
   .procs-block li {
     padding: 2px 0;
   }
+}
+
+/* --- Overlay de orientaci\u00f3n (portrait) --- */
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-size: clamp(1.2rem, 4vw, 2rem);
+  font-weight: 600;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  letter-spacing: .02em;
+}
+#rotate-overlay.visible {
+  display: flex;
 }
