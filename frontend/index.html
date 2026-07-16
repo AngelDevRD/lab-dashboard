@@ -27,7 +27,7 @@
   <main>
     <section id="server-grid" class="server-grid"></section>
 
-    <section class="card log-card" id="log-card">
+    <section class="card log-card collapsed" id="log-card">
       <div class="card-header" id="log-toggle">
         <h2>Eventos</h2>
         <span class="chevron">▾</span>
@@ -37,28 +37,57 @@
   </main>
 
   <div id="alert-banner" class="alert-banner hidden"></div>
-  <audio id="alert-sound" preload="auto" src="/static/alert.mp3"></audio>
 
   <template id="server-card-template">
     <article class="card server-card">
       <div class="card-header">
-        <h2 class="server-name">--</h2>
-        <span class="status-dot"></span>
+        <div class="server-title">
+          <span class="status-dot"></span>
+          <h2 class="server-name">--</h2>
+        </div>
+        <span class="status-text">--</span>
       </div>
 
-      <div class="summary-row">
-        <div class="stat"><span class="stat-label">CPU</span><span class="stat-value cpu-percent">--%</span></div>
-        <div class="stat"><span class="stat-label">RAM</span><span class="stat-value mem-percent">--%</span></div>
-        <div class="stat"><span class="stat-label">Disco</span><span class="stat-value disk-percent">--%</span></div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-top">
+            <span class="metric-label">CPU</span>
+            <span class="metric-value cpu-percent">--%</span>
+          </div>
+          <div class="bar"><div class="bar-fill cpu-bar"></div></div>
+        </div>
+        <div class="metric">
+          <div class="metric-top">
+            <span class="metric-label">RAM</span>
+            <span class="metric-value mem-percent">--%</span>
+          </div>
+          <div class="bar"><div class="bar-fill mem-bar"></div></div>
+        </div>
+        <div class="metric">
+          <div class="metric-top">
+            <span class="metric-label">Disco</span>
+            <span class="metric-value disk-percent">--%</span>
+          </div>
+          <div class="bar"><div class="bar-fill disk-bar"></div></div>
+        </div>
       </div>
 
-      <div class="summary-row">
-        <div class="stat"><span class="stat-label">Temp</span><span class="stat-value cpu-temp">--</span></div>
-        <div class="stat"><span class="stat-label">Energía</span><span class="stat-value power-value">--</span></div>
-        <div class="stat"><span class="stat-label">Docker</span><span class="stat-value docker-summary">--</span></div>
+      <div class="mini-stats">
+        <div class="mini">
+          <span class="mini-label">Temp</span>
+          <span class="mini-value cpu-temp">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label">Energía</span>
+          <span class="mini-value power-value">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label">Docker</span>
+          <span class="mini-value docker-summary">--</span>
+        </div>
       </div>
 
-      <div class="summary-row muted">
+      <div class="card-footer">
         <span class="uptime">--</span>
         <span class="latency">--</span>
       </div>

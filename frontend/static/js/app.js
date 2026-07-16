@@ -3,10 +3,10 @@
 
   const grid = document.getElementById("server-grid");
   const template = document.getElementById("server-card-template");
-  const cards = new Map(); // host -> { el, refs, last: {} }
+  const cards = new Map();
   const prevOnline = new Map();
   let selectedHost = null;
-  let latestServers = new Map(); // host -> server data, for the open detail panel
+  let latestServers = new Map();
 
   const bytesFmt = (n) => {
     if (n == null) return "--";
@@ -18,12 +18,20 @@
   };
   const bpsFmt = (n) => `${bytesFmt(n)}/s`;
 
-  // Only touch the DOM when a value actually changed - avoids reflow/repaint
-  // on every poll cycle for numbers that didn't move.
   function setText(refs, key, text) {
     if (refs.last[key] === text) return;
     refs.last[key] = text;
     refs.el[key].textContent = text;
+  }
+
+  function setBar(refs, key, pct) {
+    if (refs.last[key] === pct) return;
+    refs.last[key] = pct;
+    const el = refs.el[key];
+    el.style.width = `${pct}%`;
+    const level = pct >= 90 ? "bad" : pct >= 70 ? "warn" : "";
+    const target = level ? `bar-fill ${level}` : "bar-fill";
+    if (el.className !== target) el.className = target;
   }
 
   function statusLevel(s) {
@@ -45,9 +53,13 @@
       el: {
         name: el.querySelector(".server-name"),
         dot: el.querySelector(".status-dot"),
+        statusText: el.querySelector(".status-text"),
         cpu: el.querySelector(".cpu-percent"),
         mem: el.querySelector(".mem-percent"),
         disk: el.querySelector(".disk-percent"),
+        cpuBar: el.querySelector(".cpu-bar"),
+        memBar: el.querySelector(".mem-bar"),
+        diskBar: el.querySelector(".disk-bar"),
         temp: el.querySelector(".cpu-temp"),
         power: el.querySelector(".power-value"),
         docker: el.querySelector(".docker-summary"),
@@ -59,6 +71,17 @@
     };
     cards.set(host, refs);
     return refs;
+  }
+
+  function setStatusText(el, online, level) {
+    if (online) {
+      const text = level === "red" ? "CRITICAL" : level === "yellow" ? "WARNING" : "ONLINE";
+      el.textContent = text;
+      el.className = "status-text";
+    } else {
+      el.textContent = "OFFLINE";
+      el.className = "status-text offline";
+    }
   }
 
   function renderServer(s) {
@@ -77,9 +100,13 @@
 
     if (!s.online) {
       refs.el.dot.className = "status-dot offline";
+      setStatusText(refs.el.statusText, false);
       setText(refs, "cpu", "--%");
       setText(refs, "mem", "--%");
       setText(refs, "disk", "--%");
+      setBar(refs, "cpuBar", 0);
+      setBar(refs, "memBar", 0);
+      setBar(refs, "diskBar", 0);
       setText(refs, "temp", "--");
       setText(refs, "power", "--");
       setText(refs, "docker", "--");
@@ -97,9 +124,18 @@
       refs.last.dot = dotTarget;
     }
 
-    setText(refs, "cpu", `${s.cpu?.percent ?? 0}%`);
-    setText(refs, "mem", `${s.mem?.percent ?? 0}%`);
-    setText(refs, "disk", `${s.disk?.percent ?? 0}%`);
+    setStatusText(refs.el.statusText, true, level);
+
+    const cpuPct = s.cpu?.percent ?? 0;
+    const memPct = s.mem?.percent ?? 0;
+    const diskPct = s.disk?.percent ?? 0;
+    setText(refs, "cpu", `${cpuPct}%`);
+    setText(refs, "mem", `${memPct}%`);
+    setText(refs, "disk", `${diskPct}%`);
+    setBar(refs, "cpuBar", cpuPct);
+    setBar(refs, "memBar", memPct);
+    setBar(refs, "diskBar", diskPct);
+
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
     const power = s.power || {};
@@ -277,7 +313,6 @@
     renderSummary(data);
     renderInternet(data.internet);
     renderEvents(data.events);
-    // Limpiar cualquier clase servers-N anterior y aplicar la correcta
     const count = data.servers ? data.servers.length : 0;
     grid.classList.remove(
       "servers-1", "servers-2", "servers-3",
@@ -327,14 +362,14 @@
     if (ev.target.id === "detail-overlay") closeDetail();
   });
 
-  // --- Events log collapse (saves vertical space by default) ---
+  // --- Events log collapse ---
   const logCard = document.getElementById("log-card");
   document.getElementById("log-toggle").addEventListener("click", () => {
     logCard.classList.toggle("collapsed");
   });
   logCard.classList.add("collapsed");
 
-  // --- Clock (no need for a full date line, saves a text node + width) ---
+  // --- Clock ---
   function tickClock() {
     document.getElementById("clock").textContent = new Date().toLocaleTimeString();
   }
@@ -362,7 +397,7 @@
     }
   });
 
-  // --- Detección de orientación: aviso "Gire la tablet" en portrait ---
+  // --- Orientation detection ---
   const rotateOverlay = document.createElement("div");
   rotateOverlay.id = "rotate-overlay";
   rotateOverlay.innerHTML = "&#x21BA; Gire la tablet";
