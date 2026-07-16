@@ -8,3 +8,8 @@ logs/*.log
 # Docker
 *.env.local
 
+# Operational / runtime
+logs/
+backups/
+config/
+

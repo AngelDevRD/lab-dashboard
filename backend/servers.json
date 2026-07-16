@@ -1,7 +1,7 @@
 {
   "servers": [
-    { "name": "Servidor 1", "host": "192.168.100.6", "ssh_port": 22, "ssh_user": "angel1" },
+    { "name": "Servidor 1", "host": "192.168.100.6", "ssh_port": 22, "ssh_user": "angel" },
     { "name": "Servidor 2", "host": "192.168.100.7", "ssh_port": 22, "ssh_user": "angel1" },
-    { "name": "Servidor 3", "host": "192.168.100.8", "ssh_port": 22, "ssh_user": "angel1" }
+    { "name": "Servidor 3", "host": "192.168.100.8", "ssh_port": 22, "ssh_user": "angel2" }
   ]
 }
