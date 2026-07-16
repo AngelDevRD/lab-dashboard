@@ -4,6 +4,8 @@ __pycache__/
 .env
 logs/*.log
 .DS_Store
+servers.json
+config/ssh/known_hosts
 
 # Docker
 *.env.local

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from pathlib import Path
 
 import paramiko
 
@@ -8,12 +9,18 @@ from . import config
 
 logger = logging.getLogger("dashboard")
 
+KNOWN_HOSTS_PATH = (
+    Path(__file__).resolve().parent.parent.parent / "config" / "ssh" / "known_hosts"
+)
+
 
 class SSHConnection:
     """Reusable SSH connection for one server.
 
     Reconnects lazily on failure, backing off exponentially so a downed
     server or bad credentials can't produce a rapid-fire reconnect storm.
+
+    Host key verification is done against config/ssh/known_hosts.
     """
 
     def __init__(self, host: str, port: int, username: str):
@@ -39,7 +46,7 @@ class SSHConnection:
             return
         try:
             client.close()
-        except Exception:  # noqa: BLE001 - closing must never raise
+        except Exception:
             logger.debug("Error closing SSH client for %s", self.host, exc_info=True)
 
     def _on_failure(self, exc: Exception) -> None:
@@ -68,7 +75,12 @@ class SSHConnection:
 
     def _connect_blocking(self) -> None:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        if KNOWN_HOSTS_PATH.exists():
+            client.load_host_keys(str(KNOWN_HOSTS_PATH))
+        else:
+            logger.warning("No known_hosts file at %s — SSH host keys will NOT be verified", KNOWN_HOSTS_PATH)
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
             client.connect(
                 hostname=self.host,
@@ -100,7 +112,7 @@ class SSHConnection:
             out = stdout.read().decode("utf-8", errors="replace")
             stdout.channel.recv_exit_status()
             return True, out
-        except Exception as exc:  # noqa: BLE001 - any SSH/network failure means offline
+        except Exception as exc:
             self._on_failure(exc)
             return False, str(exc)
 
@@ -109,14 +121,12 @@ class SSHConnection:
             return await asyncio.to_thread(self._run_blocking, command)
 
     async def run_many(self, commands: dict[str, str]) -> dict[str, tuple[bool, str]]:
-        """Run several commands over one SSH session sequentially, reusing the connection."""
         async with self._lock:
             results: dict[str, tuple[bool, str]] = {}
             for key, cmd in commands.items():
                 ok, out = await asyncio.to_thread(self._run_blocking, cmd)
                 results[key] = (ok, out)
                 if not ok:
-                    # connection is dead, no point running the rest
                     for remaining in commands:
                         if remaining not in results:
                             results[remaining] = (False, out)

@@ -1,7 +1,10 @@
+import logging
 import time
 from collections import deque
 
 from . import config
+
+logger = logging.getLogger("dashboard")
 
 config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -14,8 +17,8 @@ def log_event(kind: str, message: str) -> None:
     try:
         with open(config.LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"{event['time']:.0f}\t{kind}\t{message}\n")
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.error("No se pudo escribir al log %s: %s", config.LOG_FILE, exc)
 
 
 def recent_events(limit: int = 50) -> list[dict]:
