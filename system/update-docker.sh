@@ -22,6 +22,7 @@ HEALTH_URL="http://localhost:8600/api/health"
 MAX_RETRIES=12
 RETRY_DELAY=5
 ROLLBACK=false
+LAST_BUILT_FILE="${REPO_DIR}/.last-built-commit"
 
 mkdir -p "$LOG_DIR"
 
@@ -52,8 +53,8 @@ if [ -n "$UNTRACKED" ] && [ "${FORCE:-false}" != "true" ]; then
 fi
 
 # --- 2. Guardar commit actual para rollback ---
-BEFORE=$(git rev-parse HEAD)
-log "Commit actual: $BEFORE"
+CURRENT=$(git rev-parse HEAD)
+log "Commit actual: $CURRENT"
 
 # --- 3. Fetch + checkout + merge ---
 log "Actualizando desde origin..."
@@ -78,20 +79,26 @@ else
   fi
 fi
 
-AFTER=$(git rev-parse HEAD)
-log "Nuevo commit: $AFTER"
+HEAD=$(git rev-parse HEAD)
 
-# --- 4. Si no hubo cambios, salir ---
-if [ "$BEFORE" = "$AFTER" ]; then
-  log "No hay cambios nuevos. Actualización no necesaria."
+# --- 4. Comparar contra el último commit buildado ---
+LAST_BUILT=""
+if [ -f "$LAST_BUILT_FILE" ]; then
+  LAST_BUILT=$(cat "$LAST_BUILT_FILE")
+fi
+
+if [ "$HEAD" = "$LAST_BUILT" ]; then
+  log "Último build: $LAST_BUILT — sin cambios nuevos."
   exit 0
 fi
+
+log "Nuevos cambios detectados (HEAD $HEAD != last-built $LAST_BUILT)."
 
 # --- 5. Build de la imagen ---
 log "Construyendo nueva imagen Docker..."
 if ! docker compose build 2>&1 | tee -a "$LOG_FILE"; then
   log "ERROR: docker compose build falló. Haciendo rollback..."
-  git checkout "$BEFORE" 2>&1 | tee -a "$LOG_FILE"
+  git checkout "$CURRENT" 2>&1 | tee -a "$LOG_FILE"
   log "Rollback completado. Intentando reconstruir imagen anterior..."
   if docker compose build 2>&1 | tee -a "$LOG_FILE"; then
     log "Rollback: build exitoso. No se redeploya automáticamente — el contenedor anterior sigue corriendo."
@@ -134,8 +141,8 @@ fi
 # --- 9. Rollback si es necesario ---
 if [ "$ROLLBACK" = true ]; then
   log "=== EJECUTANDO ROLLBACK ==="
-  log "Revirtiendo a commit: $BEFORE"
-  git checkout "$BEFORE" 2>&1 | tee -a "$LOG_FILE"
+  log "Revirtiendo a commit: $CURRENT"
+  git checkout "$CURRENT" 2>&1 | tee -a "$LOG_FILE"
 
   log "Reconstruyendo imagen anterior..."
   if docker compose build 2>&1 | tee -a "$LOG_FILE"; then
@@ -166,11 +173,15 @@ if [ "$ROLLBACK" = true ]; then
   exit 1
 fi
 
-# --- 10. Limpieza de imágenes antiguas ---
+# --- 10. Guardar commit buildado ---
+echo "$HEAD" > "$LAST_BUILT_FILE"
+log "Build registrado: $HEAD"
+
+# --- 11. Limpieza de imágenes antiguas ---
 log "Limpiando imágenes Docker no utilizadas..."
 docker image prune -f 2>&1 | tee -a "$LOG_FILE"
 
 log "=== Actualización completada exitosamente ==="
-log "  Commit: $BEFORE -> $AFTER"
+log "  Commit: $HEAD"
 log "  Health: $HEALTH_URL -> OK"
 exit 0
