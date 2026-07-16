@@ -94,7 +94,64 @@ No hace falta tocar HTML/JS: la tarjeta aparece sola en el próximo ciclo de pol
   `docker`, `sensors` (paquete `lm-sensors`) y `smartctl` (paquete `smartmontools`)
   para temperatura y disco — si no están, el dashboard muestra "No disponible".
 
-## Desarrollo local
+## Docker (reemplazo del systemd + venv)
+
+### Construir
+
+```bash
+docker compose build
+```
+
+### Iniciar
+
+```bash
+docker compose up -d
+```
+
+Abrir `http://localhost:8600`.
+
+### Detener
+
+```bash
+docker compose down
+```
+
+Para eliminar también los volúmenes (logs, config):
+
+```bash
+docker compose down -v
+```
+
+### Ver logs
+
+```bash
+docker compose logs -f
+```
+
+### Actualizar
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+### Rollback
+
+```bash
+docker compose down
+# checkout al commit anterior
+git checkout <commit-anterior>
+docker compose build
+docker compose up -d
+```
+
+### Requisitos
+
+- Docker Engine 24+ y Docker Compose v2.
+- Claves SSH en `~/.ssh/id_ed25519` (o configurar `SSH_KEY_PATH` en `.env`).
+
+## Desarrollo local (sin Docker)
 
 ```bash
 cd backend
@@ -107,5 +164,10 @@ Abrir `http://localhost:8600`.
 
 ## Despliegue
 
-Ver el prompt de despliegue en `system/DEPLOY_PROMPT.md` para ejecutar en una sesión
-de Claude Code conectada por SSH al servidor Ubuntu.
+### Docker (recomendado)
+
+Ver sección Docker arriba. Para Portainer: apuntar stack al repositorio con `docker-compose.yml`.
+
+### Systemd (legacy — migrar a Docker)
+
+Ver `MIGRATION.md`.

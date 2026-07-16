@@ -1,0 +1,20 @@
+services:
+  lab-dashboard:
+    build: .
+    container_name: lab-dashboard
+    restart: always
+    ports:
+      - "8600:8600"
+    env_file:
+      - ./backend/.env
+    environment:
+      - SSH_KEY_PATH=/app/.ssh/id_ed25519
+    volumes:
+      - ./backend/servers.json:/app/servers.json
+      - ./logs:/logs
+      - ~/.ssh:/app/.ssh:ro
+      - ./config:/app/config
+    labels:
+      - "app=lab-dashboard"
+      - "description=Lab Dashboard - FastAPI monitoring"
+      - "maintainer=dashboard-deploy"

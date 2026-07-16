@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.git/
+.gitattributes
+.gitignore
+.github/
+logs/
+system/
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+MIGRATION.md

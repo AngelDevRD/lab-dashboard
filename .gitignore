@@ -4,3 +4,7 @@ __pycache__/
 .env
 logs/*.log
 .DS_Store
+
+# Docker
+*.env.local
+
