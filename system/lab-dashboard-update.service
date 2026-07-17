@@ -9,8 +9,9 @@ User=angel1
 Group=docker
 WorkingDirectory=/opt/lab-dashboard
 ExecStart=/opt/lab-dashboard/system/update-docker.sh
-StandardOutput=append:/opt/lab-dashboard/logs/update-docker.log
-StandardError=append:/opt/lab-dashboard/logs/update-docker.log
+# update-docker.sh already tees its output to logs/update-docker.log; systemd
+# captures the same stream in the journal. No StandardOutput=append here, or
+# every line would be written to the log file twice.
 
 [Install]
 WantedBy=multi-user.target
