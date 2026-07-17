@@ -4,6 +4,7 @@ import time
 from datetime import date
 
 from . import config, events
+from .alerts.service import notification_service
 from .collectors.collector import collect_internet, collect_server
 from .ssh_client import pool
 
@@ -20,9 +21,7 @@ class Monitor:
         }
         self._prev_online: dict[str, bool] = {}
         self._last_down_since: dict[str, float] = {}
-        self._daily_baseline: dict[str, tuple[str, int, int]] = (
-            {}
-        )  # host -> (date, rx0, tx0)
+        self._daily_baseline: dict[str, tuple[str, int, int]] = {}
         self._server_order: list[str] = []
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
@@ -33,7 +32,7 @@ class Monitor:
         conn = pool.get(server)
         try:
             snapshot = await collect_server(server, conn)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("collector crashed for %s", server.get("host"))
             snapshot = {
                 "name": server.get("name", server["host"]),
@@ -58,6 +57,19 @@ class Monitor:
                 self._last_down_since[server["host"]] = time.time()
         self._prev_online[server["host"]] = is_online
 
+        alert_changes = notification_service.process_server(snapshot)
+        for alert in alert_changes:
+            if alert.status.value == "active":
+                events.log_event(
+                    f"alert_{alert.severity.value.lower()}",
+                    f"[{alert.severity.value}] {alert.server}: {alert.title}",
+                )
+            else:
+                events.log_event(
+                    "alert_resolved",
+                    f"[{alert.severity.value}] {alert.server}: {alert.title} - Resuelto",
+                )
+
     def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
         net = snapshot.get("net", {})
         rx_total = net.get("rx_total")
@@ -72,7 +84,6 @@ class Monitor:
             or rx_total < baseline[1]
             or tx_total < baseline[2]
         ):
-            # new day, first sample, or counters reset (reboot) -> start fresh baseline
             self._daily_baseline[host] = (today, rx_total, tx_total)
             baseline = self._daily_baseline[host]
         _, rx0, tx0 = baseline
@@ -100,7 +111,7 @@ class Monitor:
         conn = pool.get(online_server)
         try:
             status = await collect_internet(conn)
-        except Exception as exc:  # noqa: BLE001 — error de conectividad externa, no fatal
+        except Exception as exc:
             logger.warning("collect_internet falló: %s", exc)
             status = {"google_ms": None, "cloudflare_ms": None, "online": False}
         self.internet_status = status
@@ -157,6 +168,8 @@ class Monitor:
                 "offline": len(servers) - online_count,
             },
             "events": events.recent_events(20),
+            "alerts": notification_service.get_alerts_for_snapshot(),
+            "alert_count": notification_service.get_active_alerts_count(),
             "timestamp": time.time(),
         }
 

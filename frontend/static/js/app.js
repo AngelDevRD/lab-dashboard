@@ -24,6 +24,12 @@
     refs.el[key].textContent = text;
   }
 
+  function setHTML(refs, key, html) {
+    if (refs.last[key] === html) return;
+    refs.last[key] = html;
+    refs.el[key].innerHTML = html;
+  }
+
   function setBar(refs, key, pct) {
     if (refs.last[key] === pct) return;
     refs.last[key] = pct;
@@ -139,7 +145,19 @@
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
     const power = s.power || {};
-    setText(refs, "power", power.available ? `${power.percent ?? "--"}%` : "--");
+    if (power.available) {
+      const pct = power.percent ?? 0;
+      const charging = (power.status || "").toLowerCase() === "charging";
+      const level = pct <= 20 ? "bat-critical" : pct <= 30 ? "bat-warning" : "";
+      const icon = charging
+        ? '<span class="bat-icon bat-charging"></span>'
+        : '<span class="bat-icon"></span>';
+      setHTML(refs, "power",
+        `${icon}<span class="bat-pct ${level}">${pct}%</span>`
+      );
+    } else {
+      setText(refs, "power", "--");
+    }
 
     const docker = s.docker || {};
     setText(refs, "docker", docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--");

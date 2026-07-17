@@ -14,6 +14,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from . import config
+from .alerts.center import alert_center
+from .alerts.service import notification_service
+from .alerts.thresholds import threshold_manager
 from .models import HealthResponse, StatusResponse
 from .monitor import monitor
 
@@ -123,6 +126,50 @@ async def get_status(request):
 @app.get("/api/health", response_model=HealthResponse)
 async def health():
     return HealthResponse(status="ok")
+
+
+@app.get("/api/alerts")
+async def get_alerts(server: str = "", severity: str = "", status: str = ""):
+    alerts = alert_center.get_all()
+    if server:
+        alerts = [a for a in alerts if a.server_host == server or a.server == server]
+    if severity:
+        alerts = [a for a in alerts if a.severity.value.upper() == severity.upper()]
+    if status:
+        alerts = [a for a in alerts if a.status.value == status.lower()]
+    return {
+        "alerts": [a.model_dump() for a in alerts[-200:]],
+        "count": alert_center.count(),
+    }
+
+
+@app.put("/api/alerts/{alert_id}/resolve")
+async def resolve_alert(alert_id: str):
+    alert = notification_service.manually_resolve(alert_id)
+    if not alert:
+        alert = alert_center.get(alert_id)
+        if alert:
+            alert.status = "resolved"
+            alert_center.update(alert)
+    if alert:
+        return {"ok": True, "alert": alert.model_dump()}
+    return JSONResponse(status_code=404, content={"detail": "Alert not found"})
+
+
+@app.get("/api/alerts/settings")
+async def get_alert_settings():
+    return threshold_manager.settings.model_dump()
+
+
+@app.put("/api/alerts/settings")
+async def update_alert_settings(settings: dict):
+    updated = threshold_manager.update(settings)
+    return updated.model_dump()
+
+
+@app.get("/api/alerts/count")
+async def get_alert_count():
+    return alert_center.count()
 
 
 @app.websocket("/ws")
