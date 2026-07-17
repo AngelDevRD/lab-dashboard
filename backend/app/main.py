@@ -119,7 +119,7 @@ app.add_middleware(
 
 @app.get("/api/status", response_model=StatusResponse)
 @limiter.limit("30/second")
-async def get_status(request):
+async def get_status(request: Request):
     return StatusResponse(**monitor.snapshot())
 
 

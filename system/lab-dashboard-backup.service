@@ -3,5 +3,7 @@ Description=Lab Dashboard - backup diario de config/logs
 
 [Service]
 Type=oneshot
-User=__DEPLOY_USER__
+User=angel1
+Group=docker
+WorkingDirectory=/opt/lab-dashboard
 ExecStart=/bin/bash /opt/lab-dashboard/system/backup.sh

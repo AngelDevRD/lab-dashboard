@@ -10,4 +10,6 @@ class StatusResponse(BaseModel):
     internet: dict
     summary: dict
     events: list[dict]
+    alerts: list[dict] = []
+    alert_count: int = 0
     timestamp: float
