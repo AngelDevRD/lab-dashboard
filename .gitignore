@@ -10,3 +10,9 @@ config/ssh/known_hosts
 # Docker
 *.env.local
 
+# Operational / runtime
+logs/
+backups/
+config/
+.last-built-commit
+

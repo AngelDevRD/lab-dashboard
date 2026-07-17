@@ -1,10 +1,13 @@
 [Unit]
-Description=Check lab-dashboard repo for updates every minute
+Description=Check lab-dashboard repo for Docker updates every 30 minutes
+Requires=docker.service
+After=docker.service
 
 [Timer]
-OnBootSec=30
-OnUnitActiveSec=60
-AccuracySec=5
+OnBootSec=60
+OnUnitActiveSec=30min
+AccuracySec=1min
+RandomizedDelaySec=5min
 
 [Install]
 WantedBy=timers.target

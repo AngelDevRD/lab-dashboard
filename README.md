@@ -20,11 +20,13 @@ frontend/
   static/js/app.js
 .github/workflows/deploy.yml   # push a main -> SSH al servidor vía Tailscale -> restart
 system/
-  lab-dashboard.service          # systemd: proceso del dashboard
-  ci_remote_deploy.sh            # script que corre el workflow EN el servidor (fetch/deps/tests/restart/health-check)
-  lab-dashboard-update.service   # systemd: git pull + restart (fallback opcional)
-  lab-dashboard-update.timer     # fallback opcional, no se instala por defecto
-  update.sh
+  lab-dashboard.service          # systemd: proceso del dashboard (legacy)
+  lab-dashboard-update.service   # systemd: git pull + restart (legacy)
+  lab-dashboard-update.timer     # timer legacy (cada 60s, usaba reset --hard)
+  update.sh                      # script legacy (systemd + venv)
+  update-docker.sh               # script actual: git pull + docker compose build + deploy + health check + rollback
+  lab-dashboard-update.service   # systemd: ejecuta update-docker.sh
+  lab-dashboard-update.timer     # timer Docker: cada 30 min
   nginx.conf
 ```
 
@@ -72,9 +74,10 @@ Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`
 | `SSH_USER` | `dashboard-deploy` (usuario dedicado, no root ni tu usuario personal) |
 | `SSH_PRIVATE_KEY` | Clave privada de una **deploy key dedicada** (no tu clave personal), cuya pública está en `authorized_keys` del servidor |
 
-El servicio del sistema (`system/lab-dashboard-update.service/.timer`) queda como
-fallback opcional por si Actions no puede alcanzar el servidor — no se instala por
-defecto, ver `system/DEPLOY_PROMPT.md`.
+El servicio del sistema (`system/lab-dashboard-update.service` y `system/lab-dashboard-update.timer`)
+queda como fallback opcional por si Actions no puede alcanzar el servidor — no se instala por
+defecto. La versión actualizada usa `update-docker.sh` y maneja Docker builds + health check +
+rollback automático.
 
 ## Agregar un servidor
 
@@ -95,6 +98,11 @@ No hace falta tocar HTML/JS: la tarjeta aparece sola en el próximo ciclo de pol
   para temperatura y disco — si no están, el dashboard muestra "No disponible".
 
 ## Docker (reemplazo del systemd + venv)
+
+### Requisitos
+
+- Docker Engine 24+ y Docker Compose v2.
+- Claves SSH en `~/.ssh/id_ed25519` (o configurar `SSH_KEY_PATH` en `.env`).
 
 ### Construir
 
@@ -125,31 +133,91 @@ docker compose down -v
 ### Ver logs
 
 ```bash
-docker compose logs -f
+docker compose logs -f --tail=100
 ```
 
-### Actualizar
+### Comprobar estado
 
 ```bash
-git pull
-docker compose build
-docker compose up -d
+docker compose ps
+curl http://localhost:8600/api/health
 ```
 
-### Rollback
+### Reiniciar
 
 ```bash
-docker compose down
+docker compose restart
+```
+
+### Actualizar manualmente
+
+```bash
+./system/update-docker.sh
+```
+
+### Actualizar forzado (si hay cambios locales)
+
+```bash
+FORCE=true ./system/update-docker.sh
+```
+
+### Rollback manual
+
+```bash
 # checkout al commit anterior
 git checkout <commit-anterior>
 docker compose build
 docker compose up -d
 ```
 
-### Requisitos
+## Auto-update systemd (Docker)
 
-- Docker Engine 24+ y Docker Compose v2.
-- Claves SSH en `~/.ssh/id_ed25519` (o configurar `SSH_KEY_PATH` en `.env`).
+El sistema incluye un servicio systemd para actualización automática vía Docker:
+
+| Archivo | Propósito |
+|---|---|
+| `system/update-docker.sh` | Script de actualización seguro con rollback automático |
+| `/etc/systemd/system/lab-dashboard-update.service` | Servicio oneshot que ejecuta el script |
+| `/etc/systemd/system/lab-dashboard-update.timer` | Timer opcional que revisa cada 30 minutos |
+
+### Ejecutar actualización manual
+
+```bash
+sudo systemctl start lab-dashboard-update
+```
+
+Ver el resultado:
+
+```bash
+journalctl -u lab-dashboard-update -n 50 --no-pager
+```
+
+### Habilitar actualización periódica (cada 30 min)
+
+```bash
+sudo systemctl enable lab-dashboard-update.timer
+sudo systemctl start lab-dashboard-update.timer
+```
+
+### Ver estado del timer
+
+```bash
+systemctl status lab-dashboard-update.timer
+systemctl list-timers --all | grep lab-dashboard
+```
+
+### Deshabilitar actualización periódica
+
+```bash
+sudo systemctl stop lab-dashboard-update.timer
+sudo systemctl disable lab-dashboard-update.timer
+```
+
+### Logs del updater
+
+```bash
+tail -f logs/update-docker.log
+```
 
 ## Desarrollo local (sin Docker)
 
