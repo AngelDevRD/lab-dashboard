@@ -57,7 +57,11 @@ class Monitor:
                 self._last_down_since[server["host"]] = time.time()
         self._prev_online[server["host"]] = is_online
 
-        alert_changes = notification_service.process_server(snapshot)
+        try:
+            alert_changes = notification_service.process_server(snapshot)
+        except Exception:
+            logger.exception("alert processing crashed for %s", server.get("host"))
+            alert_changes = []
         for alert in alert_changes:
             if alert.status.value == "active":
                 events.log_event(
@@ -127,10 +131,16 @@ class Monitor:
 
     async def _loop(self) -> None:
         while self._running:
-            servers = config.load_servers()
-            self._server_order = [s["host"] for s in servers]
-            await asyncio.gather(*(self._poll_server(s) for s in servers))
-            await self._poll_internet(servers)
+            try:
+                servers = config.load_servers()
+                self._server_order = [s["host"] for s in servers]
+                await asyncio.gather(*(self._poll_server(s) for s in servers))
+                await self._poll_internet(servers)
+            except Exception:
+                # A single bad cycle must never kill the whole background loop —
+                # that would freeze every server's data forever with no visible
+                # error (the task's exception is only surfaced at GC time).
+                logger.exception("monitor loop iteration crashed, continuing")
             await asyncio.sleep(config.POLL_INTERVAL)
 
     def start(self) -> None:

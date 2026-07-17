@@ -25,8 +25,8 @@ class Alert(BaseModel):
     category: str
     title: str
     description: str
-    current_value: float | None = None
-    threshold_value: float | None = None
+    current_value: float | str | None = None
+    threshold_value: float | str | None = None
     status: AlertStatus = AlertStatus.ACTIVE
     resolved_at: float | None = None
 
