@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import os
-import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -58,40 +56,11 @@ async def _broadcast_loop() -> None:
             await manager.broadcast(monitor.snapshot())
 
 
-def _sd_notify(state: str) -> None:
-    addr = os.environ.get("NOTIFY_SOCKET")
-    if not addr:
-        return
-    if addr.startswith("@"):
-        addr = "\0" + addr[1:]
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    try:
-        sock.connect(addr)
-        sock.sendall(state.encode())
-    except OSError:
-        logger.warning("sd_notify failed", exc_info=True)
-    finally:
-        sock.close()
-
-
-async def _watchdog_loop() -> None:
-    usec = int(os.environ.get("WATCHDOG_USEC", "0"))
-    if usec <= 0:
-        return
-    interval = usec / 1_000_000 / 2
-    while True:
-        _sd_notify("WATCHDOG=1")
-        await asyncio.sleep(interval)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     monitor.start()
     broadcast_task = asyncio.create_task(_broadcast_loop())
-    watchdog_task = asyncio.create_task(_watchdog_loop())
-    _sd_notify("READY=1")
     yield
-    watchdog_task.cancel()
     broadcast_task.cancel()
     await monitor.stop()
 

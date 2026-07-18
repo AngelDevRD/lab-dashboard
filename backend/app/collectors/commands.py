@@ -34,6 +34,14 @@ COMMANDS = {
     "hostname": "hostname",
 }
 
+# Expensive commands whose output rarely changes: re-run only after their TTL
+# (seconds) expires instead of on every poll cycle.
+SLOW_COMMAND_TTLS = {
+    "updates": 1800,
+    "docker_disk": 300,
+    "disk_temp": 600,
+}
+
 INTERNET_COMMANDS = {
     "ping_google": "ping -c 1 -W 2 8.8.8.8 2>/dev/null | tail -1",
     "ping_cloudflare": "ping -c 1 -W 2 1.1.1.1 2>/dev/null | tail -1",

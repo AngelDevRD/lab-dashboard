@@ -3,15 +3,33 @@ import time
 from .. import config
 from ..ssh_client import SSHConnection
 from . import parsers
-from .commands import COMMANDS, INTERNET_COMMANDS
+from .commands import COMMANDS, INTERNET_COMMANDS, SLOW_COMMAND_TTLS
+
+# host -> {command_key: (fetched_at, (ok, output))}
+_slow_cache: dict[str, dict[str, tuple[float, tuple[bool, str]]]] = {}
 
 
 async def collect_server(server: dict, conn: SSHConnection) -> dict:
     host = server["host"]
     now = time.time()
+    cache = _slow_cache.setdefault(host, {})
+    commands = {
+        key: cmd
+        for key, cmd in COMMANDS.items()
+        if key not in SLOW_COMMAND_TTLS
+        or key not in cache
+        or now - cache[key][0] >= SLOW_COMMAND_TTLS[key]
+    }
     started = time.monotonic()
-    results = await conn.run_many(COMMANDS)
+    results = await conn.run_many(commands)
     latency_ms = round((time.monotonic() - started) * 1000)
+
+    for key in SLOW_COMMAND_TTLS:
+        if key in results:
+            if results[key][0]:
+                cache[key] = (now, results[key])
+        elif key in cache:
+            results[key] = cache[key][1]
 
     online = results.get("hostname", (False, ""))[0]
     if not online:

@@ -5,8 +5,11 @@
   const template = document.getElementById("server-card-template");
   const cards = new Map();
   const prevOnline = new Map();
+  const history = new Map(); // host -> { cpu: number[], mem: number[] }
+  const HISTORY_LEN = 40;
   let selectedHost = null;
   let latestServers = new Map();
+  let firstRender = true;
 
   const bytesFmt = (n) => {
     if (n == null) return "--";
@@ -40,6 +43,29 @@
     if (el.className !== target) el.className = target;
   }
 
+  function drawSparkline(canvas, cpuSeries, memSeries) {
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const style = getComputedStyle(document.documentElement);
+    const plot = (series, color) => {
+      if (series.length < 2) return;
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      series.forEach((v, i) => {
+        const x = (i / (HISTORY_LEN - 1)) * w;
+        const y = h - (Math.min(v, 100) / 100) * h;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    };
+    plot(memSeries, style.getPropertyValue("--text-2").trim());
+    plot(cpuSeries, style.getPropertyValue("--accent").trim());
+  }
+
   function statusLevel(s) {
     if (!s.online) return "red";
     const pct = [s.cpu?.percent, s.mem?.percent, s.disk?.percent].filter((v) => v != null);
@@ -71,6 +97,7 @@
         docker: el.querySelector(".docker-summary"),
         uptime: el.querySelector(".uptime"),
         latency: el.querySelector(".latency"),
+        sparkline: el.querySelector(".sparkline"),
       },
       last: {},
       card: el,
@@ -118,6 +145,7 @@
       setText(refs, "docker", "--");
       setText(refs, "uptime", "Offline");
       setText(refs, "latency", "");
+      refs.el.sparkline.getContext("2d").clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
       flagAlert(s, false);
       if (s.host === selectedHost) renderDetail(s);
       return;
@@ -142,6 +170,14 @@
     setBar(refs, "memBar", memPct);
     setBar(refs, "diskBar", diskPct);
 
+    if (!history.has(s.host)) history.set(s.host, { cpu: [], mem: [] });
+    const hist = history.get(s.host);
+    hist.cpu.push(cpuPct);
+    hist.mem.push(memPct);
+    if (hist.cpu.length > HISTORY_LEN) hist.cpu.shift();
+    if (hist.mem.length > HISTORY_LEN) hist.mem.shift();
+    drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
+
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
     const power = s.power || {};
@@ -149,9 +185,8 @@
       const pct = power.percent ?? 0;
       const charging = (power.status || "").toLowerCase() === "charging";
       const level = pct <= 20 ? "bat-critical" : pct <= 30 ? "bat-warning" : "";
-      const icon = charging
-        ? '<span class="bat-icon bat-charging"></span>'
-        : '<span class="bat-icon"></span>';
+      const iconClasses = ["bat-icon", charging ? "bat-charging" : "", level].filter(Boolean).join(" ");
+      const icon = `<span class="${iconClasses}" style="--bat-lvl:${pct}%"></span>`;
       setHTML(refs, "power",
         `${icon}<span class="bat-pct ${level}">${pct}%</span>`
       );
@@ -338,10 +373,55 @@
     }
   }
 
+  let lastAlertsKey = "";
+  function renderAlerts(alerts) {
+    const key = alerts.map((a) => a.id + a.status).join(",");
+    if (key === lastAlertsKey) return;
+    lastAlertsKey = key;
+
+    const active = alerts.filter((a) => a.status === "active");
+    const badge = document.getElementById("alert-badge");
+    badge.textContent = active.length;
+    badge.classList.toggle("hidden", active.length === 0);
+
+    const list = document.getElementById("alert-list");
+    list.textContent = "";
+    if (!active.length) {
+      const li = document.createElement("li");
+      li.className = "alert-empty";
+      li.textContent = "Sin alertas activas";
+      list.appendChild(li);
+      return;
+    }
+    for (const a of active) {
+      const li = document.createElement("li");
+      const top = document.createElement("div");
+      top.className = "alert-row-top";
+      const label = document.createElement("span");
+      label.textContent = `${a.server}: ${a.title}`;
+      const sev = document.createElement("span");
+      sev.className = `alert-sev alert-sev-${a.severity.toLowerCase()}`;
+      sev.textContent = a.severity;
+      top.appendChild(label);
+      top.appendChild(sev);
+      const desc = document.createElement("div");
+      desc.className = "alert-desc";
+      desc.textContent = a.description;
+      li.appendChild(top);
+      li.appendChild(desc);
+      list.appendChild(li);
+    }
+  }
+
   function render(data) {
+    if (firstRender) {
+      firstRender = false;
+      grid.querySelectorAll(".server-card.skeleton").forEach((el) => el.remove());
+    }
     renderSummary(data);
     renderInternet(data.internet);
     renderEvents(data.events);
+    renderAlerts(data.alerts || []);
     const count = data.servers ? data.servers.length : 0;
     grid.classList.remove(
       "servers-1", "servers-2", "servers-3",
@@ -389,6 +469,19 @@
   }
 
   connectWS();
+
+  // --- Alert bell panel ---
+  const alertBell = document.getElementById("alert-bell");
+  const alertPanel = document.getElementById("alert-panel");
+  alertBell.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    alertPanel.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (ev) => {
+    if (!alertPanel.classList.contains("hidden") && !alertPanel.contains(ev.target)) {
+      alertPanel.classList.add("hidden");
+    }
+  });
 
   // --- Detail panel open/close ---
   document.getElementById("detail-close").addEventListener("click", closeDetail);
