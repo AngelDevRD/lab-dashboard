@@ -11,7 +11,11 @@ NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh")
 async def send_ntfy(title: str, message: str, priority: int = 4, tags: list[str] | None = None) -> None:
     try:
         import aiohttp
-        url = f"{NTFY_URL}/{NTFY_TOPIC}"
+        # Publish to the bare ntfy root, with the topic inside the JSON body.
+        # ntfy only parses a JSON body into separate title/message/tags fields
+        # when there's no topic in the URL path -- POSTing JSON to "/{topic}"
+        # makes it treat the whole JSON string as literal message text instead.
+        url = NTFY_URL
         payload = {
             "topic": NTFY_TOPIC,
             "title": title[:256],
