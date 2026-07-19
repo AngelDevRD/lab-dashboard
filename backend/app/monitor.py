@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from collections import deque
 from datetime import date
 
 from . import config, events
@@ -22,6 +23,8 @@ class Monitor:
         self._prev_online: dict[str, bool] = {}
         self._last_down_since: dict[str, float] = {}
         self._daily_baseline: dict[str, tuple[str, int, int]] = {}
+        self._cpu_history: dict[str, deque] = {}
+        self._mem_history: dict[str, deque] = {}
         self._server_order: list[str] = []
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
@@ -43,6 +46,7 @@ class Monitor:
             }
         if snapshot.get("online"):
             self._apply_daily_traffic(server["host"], snapshot)
+            self._record_history(server["host"], snapshot)
         self.servers_status[server["host"]] = snapshot
 
         was_online = self._prev_online.get(server["host"])
@@ -73,6 +77,16 @@ class Monitor:
                     "alert_resolved",
                     f"[{alert.severity.value}] {alert.server}: {alert.title} - Resuelto",
                 )
+
+    def _record_history(self, host: str, snapshot: dict) -> None:
+        cpu_pct = snapshot.get("cpu", {}).get("percent")
+        mem_pct = snapshot.get("mem", {}).get("percent")
+        if cpu_pct is None or mem_pct is None:
+            return
+        cpu_hist = self._cpu_history.setdefault(host, deque(maxlen=config.HISTORY_LEN))
+        mem_hist = self._mem_history.setdefault(host, deque(maxlen=config.HISTORY_LEN))
+        cpu_hist.append(cpu_pct)
+        mem_hist.append(mem_pct)
 
     def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
         net = snapshot.get("net", {})
@@ -161,9 +175,16 @@ class Monitor:
 
     def snapshot(self) -> dict:
         ordered_hosts = self._server_order or list(self.servers_status.keys())
-        servers = [
-            self.servers_status[h] for h in ordered_hosts if h in self.servers_status
-        ]
+        servers = []
+        for h in ordered_hosts:
+            if h not in self.servers_status:
+                continue
+            s = dict(self.servers_status[h])
+            s["history"] = {
+                "cpu": list(self._cpu_history.get(h, [])),
+                "mem": list(self._mem_history.get(h, [])),
+            }
+            servers.append(s)
         online_count = sum(1 for s in servers if s.get("online"))
         return {
             "servers": servers,

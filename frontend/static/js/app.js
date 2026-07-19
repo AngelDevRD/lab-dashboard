@@ -5,8 +5,6 @@
   const template = document.getElementById("server-card-template");
   const cards = new Map();
   const prevOnline = new Map();
-  const history = new Map(); // host -> { cpu: number[], mem: number[] }
-  const HISTORY_LEN = 40;
   let selectedHost = null;
   let latestServers = new Map();
   let firstRender = true;
@@ -54,8 +52,9 @@
       ctx.beginPath();
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
+      const n = series.length;
       series.forEach((v, i) => {
-        const x = (i / (HISTORY_LEN - 1)) * w;
+        const x = (i / (n - 1)) * w;
         const y = h - (Math.min(v, 100) / 100) * h;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -170,12 +169,7 @@
     setBar(refs, "memBar", memPct);
     setBar(refs, "diskBar", diskPct);
 
-    if (!history.has(s.host)) history.set(s.host, { cpu: [], mem: [] });
-    const hist = history.get(s.host);
-    hist.cpu.push(cpuPct);
-    hist.mem.push(memPct);
-    if (hist.cpu.length > HISTORY_LEN) hist.cpu.shift();
-    if (hist.mem.length > HISTORY_LEN) hist.mem.shift();
+    const hist = s.history || { cpu: [], mem: [] };
     drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
 
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
