@@ -1,9 +1,9 @@
 import time
 
 from .. import config
-from ..ssh_client import SSHConnection
+from ..ssh_client import SSHConnection, classify_ssh_error
 from . import parsers
-from .commands import COMMANDS, INTERNET_COMMANDS, SLOW_COMMAND_TTLS
+from .commands import COMMANDS, HOSTNAME_CMD, INTERNET_COMMANDS, SLOW_COMMAND_TTLS
 
 # host -> {command_key: (fetched_at, (ok, output))}
 _slow_cache: dict[str, dict[str, tuple[float, tuple[bool, str]]]] = {}
@@ -12,6 +12,30 @@ _slow_cache: dict[str, dict[str, tuple[float, tuple[bool, str]]]] = {}
 async def collect_server(server: dict, conn: SSHConnection) -> dict:
     host = server["host"]
     now = time.time()
+
+    # Connectivity and latency are measured from this single, cheap round-trip
+    # only. It must never be conflated with the time spent running the rest of
+    # the (potentially slow) data-collection commands below — otherwise a slow
+    # local command (e.g. smartctl, apt) or a connect timeout gets reported as
+    # "network latency", which produces bogus values like 6000+ ms and false
+    # "high latency" alerts instead of a clear timeout/unreachable state.
+    started = time.monotonic()
+    conn_ok, hostname_out = await conn.run(HOSTNAME_CMD)
+    latency_ms = round((time.monotonic() - started) * 1000)
+
+    if not conn_ok:
+        reason = classify_ssh_error(hostname_out)
+        return {
+            "name": server.get("name", host),
+            "host": host,
+            "online": False,
+            "last_update": now,
+            "error": hostname_out,
+            "offline_reason": reason,
+            # No latency_ms here on purpose: a failed/timed-out probe has no
+            # meaningful latency value and must not be treated as one.
+        }
+
     cache = _slow_cache.setdefault(host, {})
     commands = {
         key: cmd
@@ -20,9 +44,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         or key not in cache
         or now - cache[key][0] >= SLOW_COMMAND_TTLS[key]
     }
-    started = time.monotonic()
     results = await conn.run_many(commands)
-    latency_ms = round((time.monotonic() - started) * 1000)
 
     for key in SLOW_COMMAND_TTLS:
         if key in results:
@@ -30,16 +52,6 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
                 cache[key] = (now, results[key])
         elif key in cache:
             results[key] = cache[key][1]
-
-    online = results.get("hostname", (False, ""))[0]
-    if not online:
-        return {
-            "name": server.get("name", host),
-            "host": host,
-            "online": False,
-            "last_update": now,
-            "error": results.get("hostname", (False, "unreachable"))[1],
-        }
 
     def out(key: str) -> str:
         return results.get(key, (False, ""))[1]

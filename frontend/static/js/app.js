@@ -47,7 +47,9 @@
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
     const style = getComputedStyle(document.documentElement);
-    const plot = (series, color) => {
+    const gap = 2;
+    const bandH = (h - gap) / 2;
+    const plot = (series, color, top) => {
       if (series.length < 2) return;
       ctx.beginPath();
       ctx.strokeStyle = color;
@@ -55,14 +57,14 @@
       const n = series.length;
       series.forEach((v, i) => {
         const x = (i / (n - 1)) * w;
-        const y = h - (Math.min(v, 100) / 100) * h;
+        const y = top + bandH - (Math.min(v, 100) / 100) * bandH;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
       ctx.stroke();
     };
-    plot(memSeries, style.getPropertyValue("--text-2").trim());
-    plot(cpuSeries, style.getPropertyValue("--accent").trim());
+    plot(memSeries, style.getPropertyValue("--text-2").trim(), 0);
+    plot(cpuSeries, style.getPropertyValue("--accent").trim(), bandH + gap);
   }
 
   function statusLevel(s) {

@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -132,7 +133,10 @@ async def get_alert_settings():
 
 @app.put("/api/alerts/settings")
 async def update_alert_settings(settings: dict):
-    updated = threshold_manager.update(settings)
+    try:
+        updated = threshold_manager.update(settings)
+    except ValidationError as exc:
+        return JSONResponse(status_code=400, content={"detail": exc.errors()})
     return updated.model_dump()
 
 

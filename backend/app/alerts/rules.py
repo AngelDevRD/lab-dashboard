@@ -263,11 +263,26 @@ def network_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, N
     if not settings.enable_network_alerts:
         return
     if not server.get("online"):
+        # Title stays fixed ("Servidor desconectado") regardless of reason so the
+        # alert keeps the same dedup identity (see service._hash_id) while the
+        # underlying cause fluctuates between polls (e.g. timeout -> unreachable).
+        # Otherwise every reason change would look like a new alert and re-fire
+        # a fresh notification for what is really the same ongoing outage.
+        reason = server.get("offline_reason", "network_error")
+        reason_text = {
+            "timeout": "no respondió dentro del tiempo límite (timeout)",
+            "unreachable": "no es alcanzable en la red",
+            "auth_error": "rechazó la autenticación SSH",
+            "backoff": "está en backoff tras fallos previos",
+            "network_error": "sufrió un error de red",
+        }
         yield {
             "severity": Severity.CRITICAL,
             "category": "network",
             "title": "Servidor desconectado",
-            "description": f"{server.get('name')} perdió conexión.",
+            "description": f"{server.get('name')} {reason_text.get(reason, 'perdió conexión')}.",
+            "current_value": reason,
+            "threshold_value": "online",
         }
         return
     latency = server.get("latency_ms")
@@ -292,7 +307,12 @@ def network_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, N
             }
 
 
-RULES: list = [
+# network_rule is the only rule that must still run when the server is
+# offline (it's what yields the "Servidor desconectado" alert). The rest
+# depend on metrics that simply don't exist in an offline snapshot and must
+# be skipped rather than misread missing data as "unavailable" (see
+# engine.evaluate_server).
+RESOURCE_RULES: list = [
     cpu_rule,
     ram_rule,
     disk_rule,
@@ -300,5 +320,6 @@ RULES: list = [
     temp_rule,
     services_rule,
     power_rule,
-    network_rule,
 ]
+
+RULES: list = RESOURCE_RULES + [network_rule]

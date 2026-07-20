@@ -31,8 +31,14 @@ COMMANDS = {
     "disk_temp": "smartctl -A /dev/sda 2>/dev/null | grep -i temperature | head -1",
     "top_cpu": "ps -eo pid,comm,%cpu --sort=-%cpu --no-headers | head -5",
     "top_mem": "ps -eo pid,comm,%mem --sort=-%mem --no-headers | head -5",
-    "hostname": "hostname",
 }
+
+# Run alone, before the rest of the batch: a fast, cheap round-trip used to
+# measure real connection latency and connectivity. It must never be mixed
+# into the timed batch above, since some of those commands (smartctl, apt,
+# docker) can legitimately take seconds and would inflate "latency" with
+# unrelated local command time instead of network RTT.
+HOSTNAME_CMD = "hostname"
 
 # Expensive commands whose output rarely changes: re-run only after their TTL
 # (seconds) expires instead of on every poll cycle.

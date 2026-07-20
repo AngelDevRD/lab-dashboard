@@ -1,33 +1,39 @@
 import json
 import logging
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("dashboard")
 
 SETTINGS_FILE = Path("/logs/alert_settings.json")
 
+_PCT = {"ge": 0, "le": 100}
+
 
 class ThresholdSettings(BaseModel):
-    battery_warning: int = 30
-    battery_critical: int = 20
-    battery_emergency: int = 10
-    cpu_warning: int = 80
-    cpu_critical: int = 95
-    cpu_max_temp: float = 85.0
-    ram_critical: int = 95
-    ram_warning: int = 80
-    disk_critical: int = 95
-    disk_warning: int = 80
-    disk_min_free_bytes: int = 2000000000
-    disk_max_temp: float = 60.0
-    swap_warning: int = 50
-    swap_critical: int = 80
-    latency_warning_ms: int = 300
-    latency_critical_ms: int = 800
-    load_warning_multiplier: float = 2.0
-    check_interval: int = 10
-    alert_cooldown_seconds: int = 300
+    battery_warning: int = Field(30, **_PCT)
+    battery_critical: int = Field(20, **_PCT)
+    battery_emergency: int = Field(10, **_PCT)
+    cpu_warning: int = Field(80, **_PCT)
+    cpu_critical: int = Field(95, **_PCT)
+    cpu_max_temp: float = Field(85.0, ge=0)
+    ram_critical: int = Field(95, **_PCT)
+    ram_warning: int = Field(80, **_PCT)
+    disk_critical: int = Field(95, **_PCT)
+    disk_warning: int = Field(80, **_PCT)
+    disk_min_free_bytes: int = Field(2000000000, ge=0)
+    disk_max_temp: float = Field(60.0, ge=0)
+    swap_warning: int = Field(50, **_PCT)
+    swap_critical: int = Field(80, **_PCT)
+    latency_warning_ms: int = Field(300, ge=0)
+    latency_critical_ms: int = Field(800, ge=0)
+    load_warning_multiplier: float = Field(2.0, ge=0)
+    check_interval: int = Field(10, ge=1)
+    alert_cooldown_seconds: int = Field(300, ge=0)
+    # Consecutive poll cycles a condition must hold before an alert is raised
+    # or cleared. Smooths out single-sample noise near a threshold so a brief
+    # blip doesn't create/resolve/re-create the same alert repeatedly.
+    hysteresis_cycles: int = Field(2, ge=1, le=20)
     enable_battery_alerts: bool = True
     enable_cpu_alerts: bool = True
     enable_ram_alerts: bool = True
@@ -66,7 +72,11 @@ class ThresholdManager:
         return self._settings
 
     def update(self, updates: dict) -> ThresholdSettings:
-        self._settings = self._settings.model_copy(update=updates)
+        # Re-validate through the constructor (not model_copy, which skips
+        # validation) so an invalid/out-of-range/null value from the API
+        # can't silently corrupt live thresholds.
+        merged = {**self._settings.model_dump(), **updates}
+        self._settings = ThresholdSettings(**merged)
         self._save()
         return self._settings
 
