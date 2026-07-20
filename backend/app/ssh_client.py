@@ -14,6 +14,31 @@ KNOWN_HOSTS_PATH = (
 )
 
 
+def classify_ssh_error(message: str) -> str:
+    """Map a raw SSH error string to a stable reason code.
+
+    Used to keep 'timeout', 'unreachable' and 'auth error' distinct in alerts
+    instead of collapsing everything into a generic 'offline'/'high latency'.
+    """
+    msg = message.lower()
+    if "en backoff" in msg:
+        return "backoff"
+    if "timed out" in msg or "timeout" in msg:
+        return "timeout"
+    if (
+        "no route to host" in msg
+        or "no valid connections" in msg
+        or "connection refused" in msg
+        or "network is unreachable" in msg
+        or "unable to connect" in msg
+        or "unreachable" in msg
+    ):
+        return "unreachable"
+    if "authentication" in msg or "auth" in msg:
+        return "auth_error"
+    return "network_error"
+
+
 class SSHConnection:
     """Reusable SSH connection for one server.
 
