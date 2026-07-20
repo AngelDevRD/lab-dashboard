@@ -58,8 +58,14 @@ class SSHConnection:
         self._next_attempt_at = 0.0
 
     def _backoff_seconds(self) -> float:
+        # Cap the exponent, not just the final result: a host that stays down
+        # for days drives _consecutive_failures into the thousands, and
+        # 2**failures overflows float before min() ever gets a chance to
+        # clamp it. 20 doublings already blows past SSH_BACKOFF_MAX for any
+        # sane base/max, so it's a safe ceiling regardless of config.
+        exponent = min(self._consecutive_failures, 20)
         return min(
-            config.SSH_BACKOFF_BASE * (2**self._consecutive_failures),
+            config.SSH_BACKOFF_BASE * (2**exponent),
             config.SSH_BACKOFF_MAX,
         )
 
@@ -77,7 +83,10 @@ class SSHConnection:
     def _on_failure(self, exc: Exception) -> None:
         self._close_client(self._client)
         self._client = None
-        self._consecutive_failures += 1
+        # Cap the counter itself so it stays a meaningful number in logs for
+        # a host that's been down for days/weeks, instead of climbing into
+        # the tens of thousands. 20 already saturates _backoff_seconds.
+        self._consecutive_failures = min(self._consecutive_failures + 1, 20)
         wait = self._backoff_seconds()
         self._next_attempt_at = time.monotonic() + wait
         logger.warning(
