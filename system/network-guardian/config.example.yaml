@@ -1,0 +1,28 @@
+# Copiar a /etc/network-guardian/config.yaml y ajustar.
+# El agente NO cambia de red: solo usa preferred_ssid/backup_ssid para etiquetar
+# el motivo del evento cuando detecta que wpa_supplicant ya cambió de red solo.
+
+interface: wlp1s0
+preferred_ssid: "Angel"
+backup_ssid: "santamaria"
+
+poll_interval_sec: 10
+ping_timeout_sec: 2
+extra_ping_targets:
+  - "1.1.1.1"
+  - "8.8.8.8"
+# El gateway de la ruta default se agrega automáticamente además de estos.
+
+status_file: /etc/network-guardian/status.json
+log_file: /var/log/network-guardian/events.log
+log_level: INFO
+log_max_bytes: 5242880   # 5 MB
+log_backup_count: 5
+
+# Watchdog de recuperación: si no hay internet por más de recovery_after_sec, se pide a
+# systemd-networkd que reconfigure la interfaz (equivalente a lo que hace un reboot,
+# sin reiniciar nada más). cooldown evita reintentos en loop si de verdad no hay red
+# disponible. Ver README.md — incidente 2026-07-20.
+recovery_enabled: true
+recovery_after_sec: 90
+recovery_cooldown_sec: 120

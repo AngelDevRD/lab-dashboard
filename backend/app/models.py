@@ -7,6 +7,7 @@ class HealthResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     servers: list[dict]
+    connectivity: list[dict] = []
     internet: dict
     summary: dict
     events: list[dict]

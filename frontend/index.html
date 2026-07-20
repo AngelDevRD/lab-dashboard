@@ -33,6 +33,13 @@
   </header>
 
   <main>
+    <section class="card connectivity-card" id="connectivity-card">
+      <div class="card-header">
+        <h2>Estado de Conectividad</h2>
+      </div>
+      <div id="connectivity-grid" class="connectivity-grid"></div>
+    </section>
+
     <section id="server-grid" class="server-grid">
       <article class="card server-card skeleton"></article>
       <article class="card server-card skeleton"></article>
@@ -48,6 +55,27 @@
   </main>
 
   <div id="alert-banner" class="alert-banner hidden"></div>
+
+  <template id="connectivity-card-template">
+    <article class="card connectivity-device">
+      <div class="card-header">
+        <div class="server-title">
+          <span class="status-dot"></span>
+          <h3 class="device-name">--</h3>
+        </div>
+        <span class="status-text">--</span>
+      </div>
+      <div class="connectivity-details">
+        <div class="mini"><span class="mini-label">Red</span><span class="mini-value device-network">--</span></div>
+        <div class="mini"><span class="mini-label">Intensidad</span><span class="mini-value device-rssi">--</span></div>
+        <div class="mini"><span class="mini-label">Link speed</span><span class="mini-value device-link-speed">--</span></div>
+        <div class="mini"><span class="mini-label">Ping</span><span class="mini-value device-ping">--</span></div>
+        <div class="mini"><span class="mini-label">IP</span><span class="mini-value device-ip">--</span></div>
+        <div class="mini"><span class="mini-label">Conectado desde</span><span class="mini-value device-connected-since">--</span></div>
+        <div class="mini device-last-failover-wrap"><span class="mini-label">Último failover</span><span class="mini-value device-last-failover">--</span></div>
+      </div>
+    </article>
+  </template>
 
   <template id="server-card-template">
     <article class="card server-card">
@@ -98,11 +126,16 @@
           <span class="mini-label">Docker</span>
           <span class="mini-value docker-summary">--</span>
         </div>
+        <div class="mini">
+          <span class="mini-label">Red WiFi</span>
+          <span class="mini-value wifi-network">--</span>
+        </div>
       </div>
 
       <div class="card-footer">
         <span class="uptime">--</span>
         <span class="latency">--</span>
+        <span class="wifi-ping">--</span>
       </div>
     </article>
   </template>
@@ -127,6 +160,12 @@
           <div><span class="label">Disco Docker</span><span class="value" id="detail-docker-disk">--</span></div>
           <div><span class="label">Actualizaciones</span><span class="value" id="detail-updates">--</span></div>
           <div><span class="label">Temp por núcleo</span><span class="value" id="detail-temp-cores">--</span></div>
+          <div><span class="label">Red WiFi</span><span class="value" id="detail-wifi-network">--</span></div>
+          <div><span class="label">Intensidad</span><span class="value" id="detail-wifi-rssi">--</span></div>
+          <div><span class="label">Link speed</span><span class="value" id="detail-wifi-linkspeed">--</span></div>
+          <div><span class="label">Ping WiFi</span><span class="value" id="detail-wifi-ping">--</span></div>
+          <div><span class="label">Conectado desde</span><span class="value" id="detail-wifi-since">--</span></div>
+          <div><span class="label">Último failover</span><span class="value" id="detail-wifi-failover">--</span></div>
         </div>
 
         <h3>Servicios</h3>

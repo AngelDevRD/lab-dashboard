@@ -3,9 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -139,6 +139,20 @@ async def update_alert_settings(settings: dict):
 @app.get("/api/alerts/count")
 async def get_alert_count():
     return alert_center.count()
+
+
+@app.post("/api/network/report")
+@limiter.limit("30/second")
+async def report_network(
+    request: Request, payload: dict, x_guardian_token: str = Header(default="")
+):
+    if not config.NETWORK_REPORT_TOKEN or x_guardian_token != config.NETWORK_REPORT_TOKEN:
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+    device_id = payload.get("device_id")
+    if not device_id:
+        return JSONResponse(status_code=422, content={"detail": "device_id required"})
+    monitor.report_device(device_id, {k: v for k, v in payload.items() if k != "device_id"})
+    return Response(status_code=204)
 
 
 @app.websocket("/ws")

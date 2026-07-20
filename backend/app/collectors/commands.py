@@ -32,6 +32,7 @@ COMMANDS = {
     "top_cpu": "ps -eo pid,comm,%cpu --sort=-%cpu --no-headers | head -5",
     "top_mem": "ps -eo pid,comm,%mem --sort=-%mem --no-headers | head -5",
     "hostname": "hostname",
+    "network_status": "cat /etc/network-guardian/status.json 2>/dev/null || echo '{}'",
 }
 
 # Expensive commands whose output rarely changes: re-run only after their TTL

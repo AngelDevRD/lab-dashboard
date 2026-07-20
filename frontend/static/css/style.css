@@ -107,6 +107,7 @@ body {
 }
 .status-dot.online { background: var(--ok); box-shadow: 0 0 6px rgba(52,211,153,.7); }
 .status-dot.offline { background: var(--bad); box-shadow: 0 0 6px rgba(248,113,113,.7); }
+.status-dot.warn { background: var(--warn); box-shadow: 0 0 6px rgba(251,191,36,.7); }
 
 /* ===================== Main ===================== */
 main {
@@ -229,7 +230,7 @@ main {
 
 .mini-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
   gap: 8px;
 }
 .mini {
@@ -260,6 +261,45 @@ main {
   font-variant-numeric: tabular-nums;
 }
 .card-footer .latency { text-align: right; }
+
+/* ===================== Connectivity ===================== */
+.connectivity-card {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.connectivity-card .card-header h2 { font-size: 0.9rem; margin: 0; font-weight: 700; }
+.connectivity-card.hidden { display: none; }
+.connectivity-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 10px;
+}
+.connectivity-device {
+  background: var(--panel-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connectivity-device .device-name {
+  font-size: 0.88rem;
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.connectivity-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.connectivity-details .device-last-failover-wrap { grid-column: 1 / -1; }
 
 /* ===================== Event log ===================== */
 .log-card {

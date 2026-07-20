@@ -27,6 +27,12 @@ class Monitor:
         self.internet_last_outage: float | None = None
         self._task: asyncio.Task | None = None
         self._running = False
+        self._pushed_devices: dict[str, dict] = {}
+
+    def report_device(self, device_id: str, payload: dict) -> None:
+        """Stores a self-reported connectivity snapshot pushed by a device that the
+        dashboard cannot reach over SSH (Windows PC, Android tablet)."""
+        self._pushed_devices[device_id] = {**payload, "last_seen": time.time()}
 
     async def _poll_server(self, server: dict) -> None:
         conn = pool.get(server)
@@ -159,6 +165,27 @@ class Monitor:
                 pass
         pool.close_all()
 
+    def _connectivity_snapshot(self, servers: list[dict]) -> list[dict]:
+        now = time.time()
+        devices = []
+        for s in servers:
+            net = s.get("network")
+            if net and net.get("available"):
+                devices.append(
+                    {"device_id": s["host"], "name": s.get("name", s["host"]), "source": "ssh", **net}
+                )
+        for device_id, payload in self._pushed_devices.items():
+            stale = now - payload.get("last_seen", 0) > config.NETWORK_DEVICE_STALE_SEC
+            devices.append(
+                {
+                    **payload,
+                    "device_id": device_id,
+                    "source": "push",
+                    "status": "stale" if stale else payload.get("status", "ok"),
+                }
+            )
+        return devices
+
     def snapshot(self) -> dict:
         ordered_hosts = self._server_order or list(self.servers_status.keys())
         servers = [
@@ -167,6 +194,7 @@ class Monitor:
         online_count = sum(1 for s in servers if s.get("online"))
         return {
             "servers": servers,
+            "connectivity": self._connectivity_snapshot(servers),
             "internet": {
                 **self.internet_status,
                 "down_since": self.internet_down_since,

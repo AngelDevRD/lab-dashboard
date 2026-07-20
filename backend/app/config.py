@@ -20,6 +20,11 @@ SSH_BACKOFF_BASE = float(os.getenv("SSH_BACKOFF_BASE", "2"))
 SSH_BACKOFF_MAX = float(os.getenv("SSH_BACKOFF_MAX", "60"))
 INTERNET_CHECK_TARGETS = ["8.8.8.8", "1.1.1.1"]
 LOG_FILE = Path(os.getenv("LOG_FILE", BASE_DIR.parent / "logs" / "events.log"))
+LOG_FILE_MAX_BYTES = int(os.getenv("LOG_FILE_MAX_BYTES", str(5 * 1024 * 1024)))
+LOG_FILE_BACKUP_COUNT = int(os.getenv("LOG_FILE_BACKUP_COUNT", "5"))
+
+NETWORK_REPORT_TOKEN = os.getenv("NETWORK_REPORT_TOKEN", "")
+NETWORK_DEVICE_STALE_SEC = float(os.getenv("NETWORK_DEVICE_STALE_SEC", "60"))
 
 CORS_ORIGINS = [
     o.strip()
