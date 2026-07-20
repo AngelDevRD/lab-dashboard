@@ -87,6 +87,19 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def no_stale_cache(request: Request, call_next):
+    # Tablets running old/quirky browsers (Android WebViews, frozen Chrome
+    # builds) don't reliably follow HTTP caching heuristics, so we spell out
+    # the policy explicitly instead of leaving it up to their guesswork.
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/api/status", response_model=StatusResponse)
 @limiter.limit("30/second")
 async def get_status(request: Request):
