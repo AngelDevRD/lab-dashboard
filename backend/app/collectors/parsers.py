@@ -272,3 +272,18 @@ def parse_ping(raw: str) -> float | None:
     if m:
         return round(float(m.group(1)), 1)
     return None
+
+
+def parse_network_status(raw: str) -> dict:
+    """Parses the JSON status file written locally by network_guardian_agent.py."""
+    raw = raw.strip()
+    default = {"available": False}
+    if not raw:
+        return default
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return default
+    if not isinstance(data, dict) or not data:
+        return default
+    return {"available": True, **data}

@@ -1,0 +1,18 @@
+[Unit]
+Description=Network Guardian (monitor de conectividad WiFi, solo lectura)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=200
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/network-guardian/network_guardian_agent.py
+Restart=always
+RestartSec=3
+ProtectSystem=strict
+ReadWritePaths=/etc/network-guardian /var/log/network-guardian
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

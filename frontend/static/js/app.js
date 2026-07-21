@@ -4,6 +4,9 @@
   const grid = document.getElementById("server-grid");
   const template = document.getElementById("server-card-template");
   const cards = new Map();
+  const connectivityGrid = document.getElementById("connectivity-grid");
+  const connectivityTemplate = document.getElementById("connectivity-card-template");
+  const connectivityCards = new Map();
   const prevOnline = new Map();
   let selectedHost = null;
   let latestServers = new Map();
@@ -98,6 +101,8 @@
         docker: el.querySelector(".docker-summary"),
         uptime: el.querySelector(".uptime"),
         latency: el.querySelector(".latency"),
+        wifiNetwork: el.querySelector(".wifi-network"),
+        wifiPing: el.querySelector(".wifi-ping"),
         sparkline: el.querySelector(".sparkline"),
       },
       last: {},
@@ -146,6 +151,8 @@
       setText(refs, "docker", "--");
       setText(refs, "uptime", "Offline");
       setText(refs, "latency", "");
+      setText(refs, "wifiNetwork", "--");
+      setText(refs, "wifiPing", "");
       refs.el.sparkline.getContext("2d").clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
       flagAlert(s, false);
       if (s.host === selectedHost) renderDetail(s);
@@ -196,9 +203,71 @@
     setText(refs, "uptime", s.uptime?.pretty || "--");
     setText(refs, "latency", s.latency_ms != null ? `${s.latency_ms} ms` : "");
 
+    const net = s.network || {};
+    setText(refs, "wifiNetwork", net.available ? (net.current_network || "Sin red") : "--");
+    setText(refs, "wifiPing", net.available && net.ping_ms != null ? `WiFi: ${net.ping_ms} ms` : "");
+
     flagAlert(s, level !== "green");
 
     if (s.host === selectedHost) renderDetail(s);
+  }
+
+  function ensureConnectivityCard(deviceId) {
+    if (connectivityCards.has(deviceId)) return connectivityCards.get(deviceId);
+    const el = connectivityTemplate.content.firstElementChild.cloneNode(true);
+    connectivityGrid.appendChild(el);
+    const refs = {
+      el: {
+        name: el.querySelector(".device-name"),
+        dot: el.querySelector(".status-dot"),
+        statusText: el.querySelector(".status-text"),
+        network: el.querySelector(".device-network"),
+        rssi: el.querySelector(".device-rssi"),
+        linkSpeed: el.querySelector(".device-link-speed"),
+        ping: el.querySelector(".device-ping"),
+        ip: el.querySelector(".device-ip"),
+        connectedSince: el.querySelector(".device-connected-since"),
+        lastFailover: el.querySelector(".device-last-failover"),
+      },
+      last: {},
+      card: el,
+    };
+    connectivityCards.set(deviceId, refs);
+    return refs;
+  }
+
+  function renderConnectivityDevice(dev) {
+    const refs = ensureConnectivityCard(dev.device_id);
+    const status = dev.status || (dev.available === false ? "unknown" : "ok");
+    const dotClass = status === "ok" ? "online" : status === "stale" || status === "degraded" ? "warn" : "offline";
+    setText(refs, "name", dev.name || dev.device_id);
+    const dotTarget = `status-dot ${dotClass}`;
+    if (refs.last.dot !== dotTarget) {
+      refs.el.dot.className = dotTarget;
+      refs.last.dot = dotTarget;
+    }
+    setText(refs, "statusText", status.toUpperCase());
+    setText(refs, "network", dev.current_network || dev.network || "--");
+    setText(refs, "rssi", dev.rssi != null ? `${dev.rssi} dBm` : "--");
+    setText(refs, "linkSpeed", dev.link_speed_mbps != null ? `${dev.link_speed_mbps} Mbps` : "--");
+    setText(refs, "ping", dev.ping_ms != null ? `${dev.ping_ms} ms` : "--");
+    setText(refs, "ip", dev.ip || "--");
+    setText(refs, "connectedSince", dev.connected_since ? new Date(dev.connected_since * 1000).toLocaleTimeString() : "--");
+    setText(refs, "lastFailover", dev.last_failover ? `${dev.last_failover.reason || "failover"} (${new Date(dev.last_failover.time * 1000).toLocaleTimeString()})` : "--");
+  }
+
+  let lastConnectivityKey = "";
+  function renderConnectivity(devices) {
+    // Los dispositivos con source "ssh" ya son servidores con su propia card (ver
+    // wifi-network/wifi-ping en renderServer) — esta sección de arriba solo muestra
+    // dispositivos que reportan por push y no tienen card propia (PC, tablet).
+    const list = (devices || []).filter((d) => d.source !== "ssh");
+    const card = document.getElementById("connectivity-card");
+    card.classList.toggle("hidden", list.length === 0);
+    const key = list.map((d) => `${d.device_id}:${d.status}:${d.current_network || d.network}:${d.rssi}:${d.ping_ms}`).join("|");
+    if (key === lastConnectivityKey) return;
+    lastConnectivityKey = key;
+    for (const dev of list) renderConnectivityDevice(dev);
   }
 
   function renderProcList(ul, procs, suffix) {
@@ -252,6 +321,16 @@
       s.updates_pending > 0 ? `${s.updates_pending} pendientes` : "Al día";
     document.getElementById("detail-temp-cores").textContent =
       s.cpu?.temp_per_core?.length ? s.cpu.temp_per_core.map((t) => `${t}°C`).join(" · ") : "--";
+
+    const net = s.network || {};
+    document.getElementById("detail-wifi-network").textContent = net.available ? (net.current_network || "Sin red") : "--";
+    document.getElementById("detail-wifi-rssi").textContent = net.available && net.rssi != null ? `${net.rssi} dBm` : "--";
+    document.getElementById("detail-wifi-linkspeed").textContent = net.available && net.link_speed_mbps != null ? `${net.link_speed_mbps} Mbps` : "--";
+    document.getElementById("detail-wifi-ping").textContent = net.available && net.ping_ms != null ? `${net.ping_ms} ms` : "--";
+    document.getElementById("detail-wifi-since").textContent = net.available && net.connected_since ? new Date(net.connected_since * 1000).toLocaleTimeString() : "--";
+    document.getElementById("detail-wifi-failover").textContent = net.available && net.last_failover
+      ? `${net.last_failover.reason || "failover"} (${new Date(net.last_failover.time * 1000).toLocaleTimeString()})`
+      : "--";
 
     const svcGrid = document.getElementById("detail-services");
     svcGrid.innerHTML = "";
@@ -416,6 +495,7 @@
     }
     renderSummary(data);
     renderInternet(data.internet);
+    renderConnectivity(data.connectivity);
     renderEvents(data.events);
     renderAlerts(data.alerts || []);
     const count = data.servers ? data.servers.length : 0;

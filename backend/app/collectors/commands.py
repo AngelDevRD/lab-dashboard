@@ -1,4 +1,4 @@
-"""All remote shell commands executed over SSH, kept in one place so they're easy to audit."""
+﻿"""All remote shell commands executed over SSH, kept in one place so they're easy to audit."""
 
 COMMANDS = {
     "uptime": "uptime -p 2>/dev/null; cat /proc/uptime",
@@ -31,6 +31,8 @@ COMMANDS = {
     "disk_temp": "smartctl -A /dev/sda 2>/dev/null | grep -i temperature | head -1",
     "top_cpu": "ps -eo pid,comm,%cpu --sort=-%cpu --no-headers | head -5",
     "top_mem": "ps -eo pid,comm,%mem --sort=-%mem --no-headers | head -5",
+    "hostname": "hostname",
+    "network_status": "cat /etc/network-guardian/status.json 2>/dev/null || echo '{}'",
 }
 
 # Run alone, before the rest of the batch: a fast, cheap round-trip used to

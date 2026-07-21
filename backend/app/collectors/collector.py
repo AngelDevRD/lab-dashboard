@@ -84,6 +84,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
         "top_cpu": parsers.parse_top_procs(out("top_cpu")),
         "top_mem": parsers.parse_top_procs(out("top_mem")),
+        "network": parsers.parse_network_status(out("network_status")),
     }
     return snapshot
 
