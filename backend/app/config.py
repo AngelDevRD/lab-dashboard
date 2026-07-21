@@ -1,4 +1,4 @@
-import json
+﻿import json
 import logging
 import os
 from pathlib import Path
@@ -15,6 +15,7 @@ SSH_KEY_PATH = os.getenv("SSH_KEY_PATH", str(Path.home() / ".ssh" / "id_ed25519"
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "3"))
 BROADCAST_INTERVAL = float(os.getenv("BROADCAST_INTERVAL", "2"))
 HISTORY_LEN = int(os.getenv("HISTORY_LEN", "40"))
+WS_SEND_TIMEOUT = float(os.getenv("WS_SEND_TIMEOUT", "5"))
 SSH_TIMEOUT = float(os.getenv("SSH_TIMEOUT", "5"))
 SSH_COMMAND_TIMEOUT = float(os.getenv("SSH_COMMAND_TIMEOUT", "8"))
 SSH_BACKOFF_BASE = float(os.getenv("SSH_BACKOFF_BASE", "2"))
@@ -26,6 +27,15 @@ LOG_FILE_BACKUP_COUNT = int(os.getenv("LOG_FILE_BACKUP_COUNT", "5"))
 
 NETWORK_REPORT_TOKEN = os.getenv("NETWORK_REPORT_TOKEN", "")
 NETWORK_DEVICE_STALE_SEC = float(os.getenv("NETWORK_DEVICE_STALE_SEC", "60"))
+
+# ccusage rescans Claude Code's local session logs on every invocation, so results
+# are cached instead of fetched on every request. Pinned to a specific version
+# (instead of @latest) so npx doesn't hit the npm registry to resolve "latest"
+# on every cold call — on a slower remote host that resolution is a big chunk
+# of the delay. Bump this deliberately when upgrading, via env var if needed.
+CLAUDE_USAGE_PACKAGE = os.getenv("CLAUDE_USAGE_PACKAGE", "ccusage@20.0.18")
+CLAUDE_USAGE_CACHE_TTL = float(os.getenv("CLAUDE_USAGE_CACHE_TTL", "300"))
+CLAUDE_USAGE_TIMEOUT = float(os.getenv("CLAUDE_USAGE_TIMEOUT", "30"))
 
 CORS_ORIGINS = [
     o.strip()

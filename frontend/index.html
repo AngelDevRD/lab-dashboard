@@ -19,6 +19,7 @@
       <span class="status-dot" id="internet-dot" title="Internet"></span>
     </div>
     <div class="topbar-right">
+      <button id="nav-metrics-btn" class="nav-btn" title="Ver métricas de Claude Code">📊 Métricas</button>
       <span id="clock" class="clock">--:--:--</span>
       <div class="alert-bell-wrap">
         <button id="alert-bell" class="icon-btn" title="Alertas">🔔<span id="alert-badge" class="alert-badge hidden">0</span></button>
@@ -32,7 +33,7 @@
     </div>
   </header>
 
-  <main>
+  <main id="view-servers" class="view">
     <section class="card connectivity-card" id="connectivity-card">
       <div class="card-header">
         <h2>Estado de Conectividad</h2>
@@ -54,7 +55,68 @@
     </section>
   </main>
 
+  <main id="view-metrics" class="view hidden">
+    <div class="view-header">
+      <button id="nav-servers-btn" class="nav-btn">← Servidores</button>
+      <h1>Métricas de Claude Code</h1>
+      <div class="days-filter" id="cu-days-filter">
+        <button class="days-btn" data-days="1">1d</button>
+        <button class="days-btn" data-days="7">7d</button>
+        <button class="days-btn" data-days="15">15d</button>
+        <button class="days-btn active" data-days="30">30d</button>
+        <button class="days-btn" data-days="60">60d</button>
+        <button class="days-btn" data-days="90">90d</button>
+        <button class="days-btn" data-days="all">Todas</button>
+      </div>
+    </div>
+
+    <section class="card" id="claude-usage-summary-card">
+      <div class="card-header">
+        <h2 id="cu-summary-title">Resumen (últimos 30 días)</h2>
+      </div>
+      <div class="mini-stats claude-usage-mini-grid">
+        <div class="mini">
+          <span class="mini-label" id="cu-cost-label">Coste (30d)</span>
+          <span class="mini-value" id="cu-total-cost">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label" id="cu-tokens-label">Tokens (30d)</span>
+          <span class="mini-value" id="cu-total-tokens">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label">Sesiones</span>
+          <span class="mini-value" id="cu-session-count">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label">Hoy</span>
+          <span class="mini-value" id="cu-today-cost">--</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="claude-usage-chart-card">
+      <div class="card-header">
+        <h2 id="cu-chart-title">Coste diario (últimos 30 días)</h2>
+      </div>
+      <canvas class="claude-usage-chart" id="cu-daily-chart" width="600" height="140"></canvas>
+    </section>
+
+    <section class="card" id="claude-usage-sessions-card">
+      <div class="card-header">
+        <h2>Todas las sesiones</h2>
+      </div>
+      <ul class="event-log session-list session-list-full" id="cu-session-list"></ul>
+    </section>
+  </main>
+
   <div id="alert-banner" class="alert-banner hidden"></div>
+
+  <div id="server-down-overlay" class="hidden">
+    <div class="server-down-box">
+      <div class="server-down-title">⚠ El servidor se ha caído</div>
+      <div class="server-down-sub">Reintentando conexión automáticamente...</div>
+    </div>
+  </div>
 
   <template id="connectivity-card-template">
     <article class="card connectivity-device">

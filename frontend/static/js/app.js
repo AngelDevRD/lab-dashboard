@@ -508,33 +508,95 @@
   }
 
   // --- WebSocket with polling fallback ---
+  // The server broadcasts every BROADCAST_INTERVAL (~2s). A WS can go "half-open"
+  // (wifi drop, device sleep, NAT rebind) without ever firing onclose/onerror,
+  // since nothing here sends TCP keepalives or WS ping/pong. A watchdog that
+  // forces a reconnect when no message has arrived in a while is what actually
+  // detects that case client-side.
+  const WS_STALE_MS = 10000;
+  // Neither the WS nor the fallback poller has produced a fresh update in
+  // this long -> the backend itself is unreachable (process crashed, host
+  // down, network to it gone), not just this one WS. Show a blocking notice.
+  const SERVER_DOWN_MS = 15000;
   let ws;
   let usingFallback = false;
   let fallbackTimer;
+  let lastMessageAt = 0;
+  let watchdogTimer;
+  let serverDownShown = false;
+
+  function log(msg) {
+    console.log(`[dashboard ${new Date().toISOString()}] ${msg}`);
+  }
+
+  function setServerDown(down) {
+    if (down === serverDownShown) return;
+    serverDownShown = down;
+    document.getElementById("server-down-overlay").classList.toggle("hidden", !down);
+    log(down ? "Server unreachable — showing down overlay" : "Server reachable again — hiding down overlay");
+  }
 
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/ws`);
-    ws.onmessage = (ev) => render(JSON.parse(ev.data));
+    if (!lastMessageAt) lastMessageAt = Date.now(); // starts the down-overlay clock even if this first attempt never connects
+    log("WS connecting...");
+    ws.onmessage = (ev) => {
+      lastMessageAt = Date.now();
+      setServerDown(false);
+      try {
+        render(JSON.parse(ev.data));
+      } catch (err) {
+        console.error("render() failed on WS message:", err);
+      }
+    };
     ws.onclose = () => {
+      log("WS closed, scheduling reconnect in 3s");
       if (!usingFallback) startFallback();
       setTimeout(connectWS, 3000);
     };
     ws.onerror = () => ws.close();
-    ws.onopen = () => stopFallback();
+    ws.onopen = () => {
+      log("WS connected");
+      lastMessageAt = Date.now();
+      stopFallback();
+    };
   }
 
+  function startWatchdog() {
+    if (watchdogTimer) return;
+    watchdogTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastMessageAt > WS_STALE_MS) {
+        log(`WS stale (no message in ${WS_STALE_MS}ms), forcing reconnect`);
+        ws.close();
+      }
+      setServerDown(Date.now() - lastMessageAt > SERVER_DOWN_MS);
+    }, 3000);
+  }
+
+  let fallbackInFlight = false;
   function startFallback() {
     usingFallback = true;
     fallbackTimer = setInterval(async () => {
+      if (fallbackInFlight) return; // avoid piling up overlapping requests
+      fallbackInFlight = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
       try {
-        const res = await fetch("/api/status");
-        render(await res.json());
-      } catch (_) {
+        const res = await fetch("/api/status", { signal: controller.signal });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = await res.json();
+        lastMessageAt = Date.now();
+        setServerDown(false);
+        render(data);
+      } catch (err) {
         if (!startFallback._log || Date.now() - startFallback._log > 30000) {
           startFallback._log = Date.now();
-          console.warn("Polling fallback: servidor no alcanzable, reintentando...");
+          console.warn("Polling fallback: servidor no alcanzable, reintentando...", err);
         }
+      } finally {
+        clearTimeout(timeout);
+        fallbackInFlight = false;
       }
     }, 2000);
   }
@@ -545,6 +607,7 @@
   }
 
   connectWS();
+  startWatchdog();
 
   // --- Alert bell panel ---
   const alertBell = document.getElementById("alert-bell");
@@ -571,6 +634,230 @@
     logCard.classList.toggle("collapsed");
   });
   logCard.classList.add("collapsed");
+
+  // --- View navigation (Servidores <-> Métricas) ---
+  const viewServers = document.getElementById("view-servers");
+  const viewMetrics = document.getElementById("view-metrics");
+  let currentView = "servers";
+
+  function showView(name) {
+    currentView = name;
+    document.body.dataset.view = name;
+    viewServers.classList.toggle("hidden", name !== "servers");
+    viewMetrics.classList.toggle("hidden", name !== "metrics");
+    if (name === "metrics") renderClaudeUsage();
+  }
+  document.getElementById("nav-metrics-btn").addEventListener("click", () => showView("metrics"));
+  document.getElementById("nav-servers-btn").addEventListener("click", () => showView("servers"));
+  showView("servers");
+
+  // --- Claude usage (ccusage) ---
+  const costFmt = (n) => `$${(n ?? 0).toFixed(2)}`;
+  const tokensFmt = (n) => {
+    if (n == null) return "--";
+    if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return `${n}`;
+  };
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  // Rounds an axis max up to a "nice" number (1/2/5 * 10^n) so gridline
+  // labels read as $20/$50 instead of $23.87.
+  function niceCeil(value) {
+    if (value <= 0) return 1;
+    const exp = Math.floor(Math.log10(value));
+    const base = Math.pow(10, exp);
+    const residual = value / base;
+    const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+    return niceResidual * base;
+  }
+
+  function drawDailyCostChart(days) {
+    const canvas = document.getElementById("cu-daily-chart");
+    // Canvas has a fixed internal pixel buffer that CSS then stretches to fill
+    // the card — if that buffer is smaller than the on-screen size the bars
+    // come out blurry/blocky. Size the buffer to the actual displayed size
+    // (times devicePixelRatio) so it renders crisp on any screen.
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 600;
+    const cssH = canvas.clientHeight || 140;
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const w = cssW;
+    const h = cssH;
+    ctx.clearRect(0, 0, w, h);
+    if (!days.length) return;
+
+    const style = getComputedStyle(document.documentElement);
+    const accent = style.getPropertyValue("--accent").trim();
+    const gridColor = style.getPropertyValue("--panel-border").trim();
+    const textColor = style.getPropertyValue("--text-2").trim();
+
+    const leftPad = 40; // room for $ axis labels
+    const labelH = 18; // room for date labels
+    const topPad = 16; // headroom above the tallest bar
+    const plotW = w - leftPad;
+    const plotH = h - labelH - topPad;
+    const plotBottom = topPad + plotH;
+
+    const rawMax = Math.max(...days.map((d) => d.totalCost), 0.01);
+    const axisMax = niceCeil(rawMax * 1.05);
+
+    // Horizontal gridlines with $ labels — without these, a flat block of
+    // bars has no reference scale and reads as an ugly, meaningless shape.
+    ctx.strokeStyle = gridColor;
+    ctx.fillStyle = textColor;
+    ctx.font = "9px sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 1;
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+      const y = plotBottom - (plotH * i) / steps;
+      ctx.beginPath();
+      ctx.moveTo(leftPad, y + 0.5);
+      ctx.lineTo(w, y + 0.5);
+      ctx.stroke();
+      ctx.fillText(`$${Math.round((axisMax * i) / steps)}`, leftPad - 6, y);
+    }
+
+    // Cap how wide a single bar can get and center the group — otherwise a
+    // single bar (e.g. the "1d" filter) stretches across the whole canvas
+    // and looks like a solid block instead of a chart.
+    const maxBarW = 44;
+    const naturalW = plotW / days.length;
+    const barW = Math.min(naturalW, maxBarW);
+    const gap = barW > 12 ? Math.min(6, barW * 0.2) : barW > 4 ? 2 : 0.5;
+    const startX = leftPad + Math.max(0, (plotW - barW * days.length) / 2);
+    const barInnerW = Math.max(barW - gap, 1);
+
+    ctx.fillStyle = accent;
+    days.forEach((d, i) => {
+      const barH = Math.max((d.totalCost / axisMax) * plotH, d.totalCost > 0 ? 2 : 0);
+      const x = startX + i * barW + gap / 2;
+      const y = plotBottom - barH;
+      roundRectPath(ctx, x, y, barInnerW, barH, Math.min(3, barInnerW / 2));
+      ctx.fill();
+    });
+
+    // A lone bar (1d filter) has nothing to compare against, so label its
+    // exact cost directly instead of leaving a bare block.
+    if (days.length === 1) {
+      ctx.fillStyle = textColor;
+      ctx.font = "600 12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(costFmt(days[0].totalCost), startX + barW / 2, topPad - 4);
+    }
+
+    ctx.fillStyle = textColor;
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    // Skip labels when bars are too narrow to fit a date under each one.
+    const labelStride = Math.max(1, Math.ceil(32 / barW));
+    days.forEach((d, i) => {
+      if (i % labelStride !== 0) return;
+      const [, month, dayNum] = (d.date || "").split("-");
+      if (!dayNum) return;
+      ctx.fillText(`${dayNum}/${month}`, startX + i * barW + barW / 2, h - 4);
+    });
+  }
+
+  const daysLabel = (days) => (days === "all" ? "todo el historial" : days === "1" ? "hoy" : `últimos ${days} días`);
+
+  let currentDays = "30";
+  document.getElementById("cu-days-filter").addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".days-btn");
+    if (!btn) return;
+    currentDays = btn.dataset.days;
+    for (const b of document.querySelectorAll(".days-btn")) b.classList.toggle("active", b === btn);
+    document.getElementById("cu-chart-title").textContent = `Coste diario (${daysLabel(currentDays)})`;
+    document.getElementById("cu-summary-title").textContent = `Resumen (${daysLabel(currentDays)})`;
+    document.getElementById("cu-cost-label").textContent = currentDays === "all" ? "Coste" : `Coste (${currentDays}d)`;
+    document.getElementById("cu-tokens-label").textContent = currentDays === "all" ? "Tokens" : `Tokens (${currentDays}d)`;
+    renderClaudeUsage();
+  });
+
+  let renderRequestId = 0;
+  async function renderClaudeUsage() {
+    const requestId = ++renderRequestId;
+    // ccusage rescans local log files on a cache miss (first load, or every 5
+    // min after the backend's TTL expires), which can take several seconds
+    // with no visual feedback otherwise — show a loading state immediately.
+    document.getElementById("cu-total-cost").textContent = "…";
+    document.getElementById("cu-total-tokens").textContent = "…";
+    document.getElementById("cu-session-count").textContent = "…";
+    document.getElementById("cu-today-cost").textContent = "…";
+    const list = document.getElementById("cu-session-list");
+    list.textContent = "";
+    const loadingLi = document.createElement("li");
+    loadingLi.textContent = "Cargando datos de Claude Code…";
+    list.appendChild(loadingLi);
+    try {
+      const [dailyRes, sessionRes] = await Promise.all([
+        fetch(`/api/claude-usage?period=daily&days=${currentDays}`),
+        fetch(`/api/claude-usage?period=session&days=${currentDays}`),
+      ]);
+      if (!dailyRes.ok || !sessionRes.ok) throw new Error("claude-usage unavailable");
+      const dailyData = await dailyRes.json();
+      const sessionData = await sessionRes.json();
+      // A newer request (e.g. the user clicked another day filter) already
+      // started and will render; drop this now-stale response.
+      if (requestId !== renderRequestId) return;
+
+      document.getElementById("cu-total-cost").textContent = costFmt(dailyData.totals?.totalCost);
+      document.getElementById("cu-total-tokens").textContent = tokensFmt(dailyData.totals?.totalTokens);
+      document.getElementById("cu-session-count").textContent = sessionData.sessions?.length ?? "--";
+
+      const days = dailyData.daily || [];
+      const today = days[days.length - 1];
+      document.getElementById("cu-today-cost").textContent = today ? costFmt(today.totalCost) : "$0.00";
+      drawDailyCostChart(days);
+
+      list.textContent = "";
+      const allSessions = [...(sessionData.sessions || [])].sort((a, b) => b.totalCost - a.totalCost);
+      for (const s of allSessions) {
+        const li = document.createElement("li");
+        const project = document.createElement("span");
+        project.className = "cu-session-project";
+        project.textContent = (s.projectPath || s.sessionId).split(/[/\\-]/).pop() || s.sessionId;
+        const meta = document.createElement("span");
+        meta.className = "cu-session-meta";
+        meta.textContent = `${costFmt(s.totalCost)} · ${tokensFmt(s.totalTokens)} tok`;
+        li.appendChild(project);
+        li.appendChild(meta);
+        list.appendChild(li);
+      }
+    } catch (_) {
+      if (requestId !== renderRequestId) return;
+      document.getElementById("cu-total-cost").textContent = "N/D";
+      document.getElementById("cu-total-tokens").textContent = "N/D";
+      document.getElementById("cu-session-count").textContent = "N/D";
+      document.getElementById("cu-today-cost").textContent = "N/D";
+      list.textContent = "";
+      const errLi = document.createElement("li");
+      errLi.textContent = "No se pudo cargar el uso de Claude Code (ccusage no disponible).";
+      list.appendChild(errLi);
+    }
+  }
+  setInterval(() => {
+    if (currentView === "metrics") renderClaudeUsage();
+  }, 120000);
 
   // --- Clock ---
   function tickClock() {
