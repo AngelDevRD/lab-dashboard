@@ -20,6 +20,9 @@ jobs:
       - name: Record start time
         run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
 
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Connect to tailnet
         uses: tailscale/github-action@v3
         with:
