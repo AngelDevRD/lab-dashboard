@@ -20,6 +20,7 @@
     </div>
     <div class="topbar-right">
       <button id="nav-metrics-btn" class="nav-btn" title="Ver métricas de Claude Code">📊 Métricas</button>
+      <button id="nav-framework-btn" class="nav-btn" title="Ver telemetría de proyectos IA">🧠 Proyectos IA</button>
       <span id="clock" class="clock">--:--:--</span>
       <div class="alert-bell-wrap">
         <button id="alert-bell" class="icon-btn" title="Alertas">🔔<span id="alert-badge" class="alert-badge hidden">0</span></button>
@@ -106,6 +107,38 @@
         <h2>Todas las sesiones</h2>
       </div>
       <ul class="event-log session-list session-list-full" id="cu-session-list"></ul>
+    </section>
+  </main>
+
+  <main id="view-framework-telemetry" class="view hidden">
+    <div class="view-header">
+      <button id="nav-servers-btn-2" class="nav-btn">← Servidores</button>
+      <h1>Proyectos — Herramienta de Desarrollo con IA</h1>
+    </div>
+
+    <section class="card" id="ft-summary-card">
+      <div class="card-header">
+        <h2>Resumen</h2>
+      </div>
+      <div class="mini-stats claude-usage-mini-grid">
+        <div class="mini">
+          <span class="mini-label">Proyectos</span>
+          <span class="mini-value" id="ft-project-count">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label">Sesiones registradas</span>
+          <span class="mini-value" id="ft-total-entries">--</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="ft-project-grid" class="server-grid"></section>
+
+    <section class="card log-card" id="ft-recent-card">
+      <div class="card-header">
+        <h2>Actividad reciente</h2>
+      </div>
+      <ul class="event-log" id="ft-recent-list"></ul>
     </section>
   </main>
 
@@ -201,6 +234,16 @@
       </div>
     </article>
   </template>
+
+  <div id="project-detail-overlay" class="detail-overlay hidden">
+    <div class="detail-panel">
+      <div class="detail-header">
+        <h2 id="pd-name">--</h2>
+        <button id="pd-close" class="icon-btn">✕</button>
+      </div>
+      <div class="detail-body" id="pd-body"></div>
+    </div>
+  </div>
 
   <div id="detail-overlay" class="detail-overlay hidden">
     <div class="detail-panel">

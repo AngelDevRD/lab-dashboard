@@ -14,6 +14,7 @@ services:
       - ./logs:/logs
       - ./config/ssh:/app/.ssh:ro
       - ./config:/config:ro
+      - ./data:/app/data
     labels:
       - "app=lab-dashboard"
       - "description=Lab Dashboard - FastAPI monitoring"

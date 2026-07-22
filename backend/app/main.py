@@ -18,7 +18,8 @@ from . import config
 from .alerts.center import alert_center
 from .alerts.service import notification_service
 from .alerts.thresholds import threshold_manager
-from .collectors import claude_usage
+from .collectors import claude_usage, framework_telemetry
+from .collectors.framework_telemetry import FrameworkTelemetryReport
 from .models import HealthResponse, StatusResponse
 from .monitor import monitor
 
@@ -45,9 +46,16 @@ class ConnectionManager:
         # a long time at the OS level. Bound every send so one bad client
         # can never stall the broadcast to everyone else.
         try:
-            await asyncio.wait_for(ws.send_json(payload), timeout=config.WS_SEND_TIMEOUT)
+            await asyncio.wait_for(
+                ws.send_json(payload), timeout=config.WS_SEND_TIMEOUT
+            )
             return None
-        except (WebSocketDisconnect, RuntimeError, ConnectionError, asyncio.TimeoutError) as exc:
+        except (
+            WebSocketDisconnect,
+            RuntimeError,
+            ConnectionError,
+            asyncio.TimeoutError,
+        ) as exc:
             logger.warning("WS send failed, dropping client: %s", exc)
             return ws
 
@@ -75,7 +83,11 @@ async def _broadcast_loop() -> None:
             else:
                 duration_ms = (time.monotonic() - started) * 1000
                 if duration_ms > config.WS_SEND_TIMEOUT * 1000:
-                    logger.warning("broadcast to %d clients took %.0fms", len(manager.active), duration_ms)
+                    logger.warning(
+                        "broadcast to %d clients took %.0fms",
+                        len(manager.active),
+                        duration_ms,
+                    )
 
 
 async def _prewarm_claude_usage() -> None:
@@ -197,9 +209,13 @@ async def get_claude_usage(period: str = "daily", days: str = "30"):
     since = None
     try:
         if days != "all":
-            since = (date.today() - timedelta(days=max(int(days), 1) - 1)).strftime("%Y%m%d")
+            since = (date.today() - timedelta(days=max(int(days), 1) - 1)).strftime(
+                "%Y%m%d"
+            )
     except ValueError:
-        return JSONResponse(status_code=422, content={"detail": f"invalid days: {days!r}"})
+        return JSONResponse(
+            status_code=422, content={"detail": f"invalid days: {days!r}"}
+        )
     try:
         return await claude_usage.get_report(period, since=since)
     except ValueError as exc:
@@ -214,19 +230,47 @@ async def get_claude_usage(period: str = "daily", days: str = "30"):
 async def report_network(
     request: Request, payload: dict, x_guardian_token: str = Header(default="")
 ):
-    if not config.NETWORK_REPORT_TOKEN or x_guardian_token != config.NETWORK_REPORT_TOKEN:
+    if (
+        not config.NETWORK_REPORT_TOKEN
+        or x_guardian_token != config.NETWORK_REPORT_TOKEN
+    ):
         return JSONResponse(status_code=401, content={"detail": "Invalid token"})
     device_id = payload.get("device_id")
     if not device_id:
         return JSONResponse(status_code=422, content={"detail": "device_id required"})
-    monitor.report_device(device_id, {k: v for k, v in payload.items() if k != "device_id"})
+    monitor.report_device(
+        device_id, {k: v for k, v in payload.items() if k != "device_id"}
+    )
     return Response(status_code=204)
+
+
+@app.post("/api/framework-telemetry/report")
+@limiter.limit("30/second")
+async def report_framework_telemetry(
+    request: Request,
+    payload: FrameworkTelemetryReport,
+    x_framework_token: str = Header(default=""),
+):
+    if (
+        not config.FRAMEWORK_TELEMETRY_TOKEN
+        or x_framework_token != config.FRAMEWORK_TELEMETRY_TOKEN
+    ):
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+    framework_telemetry.record(payload)
+    return Response(status_code=204)
+
+
+@app.get("/api/framework-telemetry")
+async def get_framework_telemetry():
+    return framework_telemetry.summary()
 
 
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
-    client = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "?"
+    client = (
+        f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "?"
+    )
     logger.info("WS connected: %s (active=%d)", client, len(manager.active))
     try:
         await websocket.send_json(monitor.snapshot())

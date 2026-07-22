@@ -14,5 +14,6 @@ config/ssh/known_hosts
 logs/
 backups/
 config/
+data/
 .last-built-commit
 

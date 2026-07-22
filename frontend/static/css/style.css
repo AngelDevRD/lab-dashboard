@@ -192,6 +192,9 @@ main {
   white-space: nowrap;
 }
 .status-text.offline { background: rgba(248, 113, 113, 0.14); color: var(--bad); }
+.status-text.ft-ok { background: rgba(52, 211, 153, 0.14); color: var(--ok); }
+.status-text.ft-warn { background: rgba(251, 191, 36, 0.14); color: var(--warn); }
+.status-text.ft-bad { background: rgba(248, 113, 113, 0.14); color: var(--bad); }
 
 .metrics {
   display: flex;
@@ -436,6 +439,62 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 .detail-grid .value { display: block; font-size: 0.95rem; font-weight: 700; }
 
 .detail-body h3 { font-size: 0.85rem; color: var(--text-2); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .08em; }
+
+.pd-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-radius: 8px;
+  margin-bottom: 4px;
+  font-size: 0.85rem;
+}
+.pd-bar-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-bar-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pd-err { color: var(--bad); font-size: 0.72rem; }
+.pd-empty { color: var(--text-2); font-size: 0.85rem; }
+
+.pd-subhead { font-size: 0.72rem; color: var(--text-2); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+
+.pd-coverage-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.pd-coverage-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+.pd-coverage-chip.pd-ok { color: var(--ok); }
+.pd-coverage-chip.pd-missing { color: var(--text-2); opacity: .6; }
+
+.pd-tech-group { margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pd-tech-cat {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-2);
+  width: 100%;
+}
+.pd-tech-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--accent);
+  cursor: help;
+}
+
+.pd-generic-json {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 0.72rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .services-grid { display: flex; flex-wrap: wrap; gap: 6px; }
 .service-chip {

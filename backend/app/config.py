@@ -28,6 +28,13 @@ LOG_FILE_BACKUP_COUNT = int(os.getenv("LOG_FILE_BACKUP_COUNT", "5"))
 NETWORK_REPORT_TOKEN = os.getenv("NETWORK_REPORT_TOKEN", "")
 NETWORK_DEVICE_STALE_SEC = float(os.getenv("NETWORK_DEVICE_STALE_SEC", "60"))
 
+FRAMEWORK_TELEMETRY_TOKEN = os.getenv("FRAMEWORK_TELEMETRY_TOKEN", "")
+FRAMEWORK_TELEMETRY_FILE = Path(
+    os.getenv(
+        "FRAMEWORK_TELEMETRY_FILE", str(BASE_DIR / "data" / "framework_telemetry.jsonl")
+    )
+)
+
 # ccusage rescans Claude Code's local session logs on every invocation, so results
 # are cached instead of fetched on every request. Pinned to a specific version
 # (instead of @latest) so npx doesn't hit the npm registry to resolve "latest"
@@ -39,7 +46,9 @@ CLAUDE_USAGE_TIMEOUT = float(os.getenv("CLAUDE_USAGE_TIMEOUT", "30"))
 
 CORS_ORIGINS = [
     o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:8600,http://127.0.0.1:8600").split(",")
+    for o in os.getenv(
+        "CORS_ORIGINS", "http://localhost:8600,http://127.0.0.1:8600"
+    ).split(",")
     if o.strip()
 ]
 

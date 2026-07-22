@@ -635,9 +635,10 @@
   });
   logCard.classList.add("collapsed");
 
-  // --- View navigation (Servidores <-> Métricas) ---
+  // --- View navigation (Servidores <-> Métricas <-> Proyectos IA) ---
   const viewServers = document.getElementById("view-servers");
   const viewMetrics = document.getElementById("view-metrics");
+  const viewFramework = document.getElementById("view-framework-telemetry");
   let currentView = "servers";
 
   function showView(name) {
@@ -645,10 +646,14 @@
     document.body.dataset.view = name;
     viewServers.classList.toggle("hidden", name !== "servers");
     viewMetrics.classList.toggle("hidden", name !== "metrics");
+    viewFramework.classList.toggle("hidden", name !== "framework-telemetry");
     if (name === "metrics") renderClaudeUsage();
+    if (name === "framework-telemetry") renderFrameworkTelemetry();
   }
   document.getElementById("nav-metrics-btn").addEventListener("click", () => showView("metrics"));
   document.getElementById("nav-servers-btn").addEventListener("click", () => showView("servers"));
+  document.getElementById("nav-framework-btn").addEventListener("click", () => showView("framework-telemetry"));
+  document.getElementById("nav-servers-btn-2").addEventListener("click", () => showView("servers"));
   showView("servers");
 
   // --- Claude usage (ccusage) ---
@@ -858,6 +863,283 @@
   setInterval(() => {
     if (currentView === "metrics") renderClaudeUsage();
   }, 120000);
+
+  // --- Framework telemetry (Herramienta de Desarrollo con IA) ---
+  const finalStateClass = (state) => {
+    if (state === "Completado") return "ft-ok";
+    if (state === "Bloqueado") return "ft-bad";
+    return "ft-warn";
+  };
+  const timeAgoFmt = (iso) => {
+    if (!iso) return "--";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  };
+  const numFmt = (n) => (n == null ? "--" : n.toLocaleString("es"));
+  let ftProjectsCache = [];
+
+  async function renderFrameworkTelemetry() {
+    const grid = document.getElementById("ft-project-grid");
+    const recentList = document.getElementById("ft-recent-list");
+    try {
+      const res = await fetch("/api/framework-telemetry");
+      if (!res.ok) throw new Error("framework-telemetry unavailable");
+      const data = await res.json();
+
+      document.getElementById("ft-project-count").textContent = data.projects?.length ?? "--";
+      document.getElementById("ft-total-entries").textContent = data.totalEntries ?? "--";
+
+      grid.textContent = "";
+      const projects = [...(data.projects || [])].sort((a, b) =>
+        (b.lastTimestamp || "").localeCompare(a.lastTimestamp || "")
+      );
+      ftProjectsCache = projects;
+      for (const p of projects) {
+        const card = document.createElement("article");
+        card.className = "card server-card ft-clickable";
+        card.innerHTML = `
+          <div class="card-header">
+            <div class="server-title"><h2 class="server-name">${p.project ?? "--"}</h2></div>
+            <span class="status-text ${finalStateClass(p.lastFinalState)}">${p.lastFinalState ?? "--"}</span>
+          </div>
+          <div class="mini-stats">
+            <div class="mini"><span class="mini-label">Último agente</span><span class="mini-value">${p.lastAgent ?? "--"}</span></div>
+            <div class="mini"><span class="mini-label">Sesiones vistas</span><span class="mini-value">${p.sessionsSeen ?? "--"}</span></div>
+            <div class="mini"><span class="mini-label">Última sesión</span><span class="mini-value">${timeAgoFmt(p.lastTimestamp)}</span></div>
+            <div class="mini"><span class="mini-label">Versión framework</span><span class="mini-value">${p.frameworkVersion ?? "--"}</span></div>
+          </div>
+          <div class="card-footer">
+            <span>${p.lastSummary ?? ""}</span>
+          </div>`;
+        card.addEventListener("click", () => openProjectDetail(p));
+        grid.appendChild(card);
+      }
+
+      recentList.textContent = "";
+      for (const entry of data.recent || []) {
+        const li = document.createElement("li");
+        const project = document.createElement("span");
+        project.className = "cu-session-project";
+        project.textContent = `${entry.project ?? "--"} — ${entry.agent ?? "--"}`;
+        const meta = document.createElement("span");
+        meta.className = "cu-session-meta";
+        meta.textContent = `${timeAgoFmt(entry.timestamp)} · ${entry.finalState ?? "--"} · ${entry.filesModified ?? 0} archivos`;
+        li.appendChild(project);
+        li.appendChild(meta);
+        recentList.appendChild(li);
+      }
+    } catch (_) {
+      grid.textContent = "";
+      const errCard = document.createElement("p");
+      errCard.textContent = "No se pudo cargar la telemetría de proyectos IA.";
+      grid.appendChild(errCard);
+    }
+  }
+  setInterval(() => {
+    if (currentView === "framework-telemetry") renderFrameworkTelemetry();
+  }, 120000);
+
+  // --- Detalle de proyecto (tokens/tools/mcps/skills/subagentes/quality real) ---
+  const pdOverlay = document.getElementById("project-detail-overlay");
+  const pdBody = document.getElementById("pd-body");
+  document.getElementById("pd-close").addEventListener("click", () => pdOverlay.classList.add("hidden"));
+  pdOverlay.addEventListener("click", (e) => { if (e.target === pdOverlay) pdOverlay.classList.add("hidden"); });
+
+  // --- Render generico + especializado por collector (arquitectura v3) ------
+  // countBarsHTML: sirve para cualquier collector con forma {clave: {count,
+  // errors}} o {clave: count} (tools/mcps/skills/subagents) -- no hardcodea
+  // cuales existen.
+  function countBarsHTML(dict, stripMcpPrefix) {
+    const rows = Object.entries(dict || {}).sort((a, b) => {
+      const ca = typeof a[1] === "object" ? a[1].count : a[1];
+      const cb = typeof b[1] === "object" ? b[1].count : b[1];
+      return cb - ca;
+    });
+    if (rows.length === 0) return `<p class="pd-empty">Sin datos reales todavía.</p>`;
+    return rows.map(([name, val]) => {
+      const count = typeof val === "object" ? val.count : val;
+      const errors = typeof val === "object" ? val.errors : 0;
+      const errTag = errors > 0 ? `<span class="pd-err">${errors} error${errors === 1 ? "" : "es"}</span>` : "";
+      const label = stripMcpPrefix ? name.replace(/^mcp__/, "") : name;
+      return `<div class="pd-bar-row"><span class="pd-bar-name">${label}</span><span class="pd-bar-count">${numFmt(count)}</span>${errTag}</div>`;
+    }).join("");
+  }
+
+  function statusBadgeHTML(status) {
+    const cls = status === "passed" || status === "APPROVED" ? "ft-ok"
+      : status === "failed" || status === "REJECTED" ? "ft-bad" : "ft-warn";
+    return `<span class="status-text ${cls}">${status ?? "--"}</span>`;
+  }
+
+  // Checklist de COBERTURA (que collector encontro datos vs. no) -- itera las
+  // claves tal cual llegan del backend, sin lista hardcodeada. Un collector
+  // nuevo del lado PowerShell aparece aca solo, sin tocar este archivo.
+  function coverageChecklistHTML(coverage) {
+    const entries = Object.entries(coverage || {}).sort((a, b) => a[0].localeCompare(b[0]));
+    if (entries.length === 0) return `<p class="pd-empty">Sin datos de cobertura.</p>`;
+    return `<div class="pd-coverage-grid">${entries.map(([name, has]) =>
+      `<span class="pd-coverage-chip ${has ? "pd-ok" : "pd-missing"}">${has ? "✓" : "✗"} ${name}</span>`
+    ).join("")}</div>`;
+  }
+
+  // dependency: tecnologias normalizadas {id, category, source, confidence,
+  // version?} -- se agrupan por categoria, la evidencia (source) va en el title.
+  function dependencySnapshotHTML(dep) {
+    const techs = dep?.technologies || [];
+    if (techs.length === 0) return `<p class="pd-empty">Sin tecnologías detectadas.</p>`;
+    const byCategory = {};
+    for (const t of techs) { (byCategory[t.category] ||= []).push(t); }
+    return Object.entries(byCategory).map(([cat, items]) => `
+      <div class="pd-tech-group">
+        <span class="pd-tech-cat">${cat}</span>
+        ${items.map((t) => `<span class="pd-tech-badge" title="Fuente: ${t.source}">${t.id}${t.version ? " " + t.version : ""}</span>`).join("")}
+      </div>`).join("");
+  }
+
+  function dockerSnapshotHTML(d) {
+    if (!d) return `<p class="pd-empty">Sin Docker detectado.</p>`;
+    const services = (d.services || []).map((s) => `<span class="pd-tech-badge">${s}</span>`).join("") || `<span class="pd-empty">Sin servicios en compose.</span>`;
+    return `
+      <div class="mini-stats">
+        <div class="mini"><span class="mini-label">Dockerfile</span><span class="mini-value">${d.hasDockerfile ? "Sí" : "No"}</span></div>
+        <div class="mini"><span class="mini-label">Compose</span><span class="mini-value">${d.hasCompose ? d.composeFile : "No"}</span></div>
+      </div>
+      <div class="pd-tech-group">${services}</div>`;
+  }
+
+  function kubernetesSnapshotHTML(k) {
+    if (!k) return `<p class="pd-empty">Sin manifests K8s detectados.</p>`;
+    return `<div class="pd-tech-group">${(k.kinds || []).map((k2) => `<span class="pd-tech-badge">${k2.kind} × ${k2.count}</span>`).join("")}</div>`;
+  }
+
+  function gitHistoryHTML(g) {
+    if (!g) return `<p class="pd-empty">Sin historial git todavía.</p>`;
+    const contributors = (g.contributors || []).map((c) =>
+      `<div class="pd-bar-row"><span class="pd-bar-name">${c.name}</span><span class="pd-bar-count">${numFmt(c.commits)}</span></div>`
+    ).join("") || `<p class="pd-empty">Sin contribuidores.</p>`;
+    return `
+      <div class="mini-stats">
+        <div class="mini"><span class="mini-label">Commits totales</span><span class="mini-value">${numFmt(g.totalCommits)}</span></div>
+        <div class="mini"><span class="mini-label">Últimos 30 días</span><span class="mini-value">${numFmt(g.commitsLast30Days)}</span></div>
+        <div class="mini"><span class="mini-label">Primer commit</span><span class="mini-value">${timeAgoFmt(g.firstCommitDate)}</span></div>
+        <div class="mini"><span class="mini-label">Último commit</span><span class="mini-value">${timeAgoFmt(g.lastCommitDate)}</span></div>
+      </div>
+      ${contributors}`;
+  }
+
+  function qualityHistoryHTML(qg) {
+    if (!qg) return `<p class="pd-empty">Sin Quality Gate reciente.</p>`;
+    const stacks = (qg.stacksDetected || []).join(", ") || "--";
+    const checks = Object.entries(qg.checks || {}).map(([name, c]) =>
+      `<div class="pd-bar-row"><span class="pd-bar-name">${name}</span>${statusBadgeHTML(c.status)}</div>`
+    ).join("");
+    return `
+      <div class="mini-stats">
+        <div class="mini"><span class="mini-label">Resultado</span>${statusBadgeHTML(qg.qualityGate)}</div>
+        <div class="mini"><span class="mini-label">Stack</span><span class="mini-value">${stacks}</span></div>
+      </div>
+      ${checks}`;
+  }
+
+  function securityHistoryHTML(sec) {
+    if (!sec) return `<p class="pd-empty">Sin escaneo de seguridad reciente.</p>`;
+    return `<div class="pd-bar-row"><span class="pd-bar-name">${sec.details ?? "--"}</span>${statusBadgeHTML(sec.status)}</div>`;
+  }
+
+  function routerHistoryHTML(r) {
+    if (!r || !r.delegations || r.delegations.length === 0) return `<p class="pd-empty">Sin delegaciones a RouterAgent en esta sesión.</p>`;
+    return r.delegations.map((d) =>
+      `<div class="pd-bar-row"><span class="pd-bar-name">${d.taskType} → ${d.provider}</span><span class="pd-bar-count">${d.ms}ms</span>${d.success ? "" : '<span class="pd-err">error</span>'}</div>`
+    ).join("");
+  }
+
+  // Fallback generico: cualquier collector futuro no reconocido explicitamente
+  // arriba se muestra igual, como tabla clave/valor -- nunca desaparece del
+  // overlay solo por ser nuevo.
+  function genericJSONHTML(value) {
+    return `<pre class="pd-generic-json">${JSON.stringify(value, null, 2)}</pre>`;
+  }
+
+  const SNAPSHOT_RENDERERS = {
+    dependency: (v) => dependencySnapshotHTML(v),
+    docker: (v) => dockerSnapshotHTML(v),
+    kubernetes: (v) => kubernetesSnapshotHTML(v),
+    metrics: (v) => countBarsHTML(Object.fromEntries((v?.byExtension || []).map((e) => [e.extension, e.count]))),
+    project: (v) => `
+      <div class="mini-stats">
+        <div class="mini"><span class="mini-label">Tipo</span><span class="mini-value">${v.projectType ?? "--"}</span></div>
+        <div class="mini"><span class="mini-label">Modo desarrollo</span><span class="mini-value">${v.developmentMode ?? "--"}</span></div>
+        <div class="mini"><span class="mini-label">Config</span><span class="mini-value">${v.configSource ?? "--"}</span></div>
+        <div class="mini"><span class="mini-label">Creado</span><span class="mini-value">${v.createdAt ?? "--"}</span></div>
+      </div>`,
+    recommendedAgents: (v) => countBarsHTML(Object.fromEntries((v || []).map((a) => [a.agent, a.score]))),
+  };
+  const HISTORY_RENDERERS = {
+    git: (v) => gitHistoryHTML(v),
+    quality: (v) => qualityHistoryHTML(v),
+    security: (v) => securityHistoryHTML(v),
+    router: (v) => routerHistoryHTML(v),
+    transcript: (v) => `
+      <div class="mini-stats">
+        <div class="mini"><span class="mini-label">Input</span><span class="mini-value">${numFmt(v.tokens?.inputTokens)}</span></div>
+        <div class="mini"><span class="mini-label">Output</span><span class="mini-value">${numFmt(v.tokens?.outputTokens)}</span></div>
+        <div class="mini"><span class="mini-label">Cache creation</span><span class="mini-value">${numFmt(v.tokens?.cacheCreationTokens)}</span></div>
+        <div class="mini"><span class="mini-label">Cache read</span><span class="mini-value">${numFmt(v.tokens?.cacheReadTokens)}</span></div>
+      </div>
+      <h4 class="pd-subhead">Herramientas</h4>${countBarsHTML(v.tools)}
+      <h4 class="pd-subhead">MCPs</h4>${countBarsHTML(v.mcps, true)}
+      <h4 class="pd-subhead">Skills</h4>${countBarsHTML(v.skills)}
+      <h4 class="pd-subhead">Subagentes</h4>${countBarsHTML(v.subagents)}`,
+  };
+  const SECTION_LABELS = {
+    dependency: "Stack y tecnologías detectadas", docker: "Docker", kubernetes: "Kubernetes",
+    metrics: "Distribución de código", project: "Configuración declarada", recommendedAgents: "Agentes recomendados",
+    git: "Historial de Git", quality: "Quality Gate", security: "Seguridad", router: "RouterAgent",
+    transcript: "Tokens y herramientas (Claude Code)",
+  };
+
+  function renderSections(dataDict, renderers) {
+    return Object.entries(dataDict || {}).map(([name, value]) => {
+      const label = SECTION_LABELS[name] || name;
+      const renderer = renderers[name];
+      const body = renderer ? renderer(value) : genericJSONHTML(value);
+      return `<h3>${label}</h3>${body}`;
+    }).join("");
+  }
+
+  function openProjectDetail(p) {
+    document.getElementById("pd-name").textContent = p.project ?? "--";
+
+    const sessions = [...(p.sessions || [])].sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+    const latestHistory = {};
+    // Para el resumen mostramos el ultimo valor no-nulo de cada collector de
+    // historial (ademas de sesion por sesion en el timeline de abajo).
+    for (const s of sessions) {
+      for (const [name, value] of Object.entries(s.history || {})) {
+        if (value != null && !(name in latestHistory)) latestHistory[name] = value;
+      }
+    }
+
+    pdBody.innerHTML = `
+      <h3>Cobertura de telemetría</h3>
+      ${coverageChecklistHTML(p.coverage)}
+
+      ${renderSections(p.snapshot, SNAPSHOT_RENDERERS)}
+      ${renderSections(latestHistory, HISTORY_RENDERERS)}
+
+      <h3>Timeline de sesiones (${sessions.length})</h3>
+      <ul class="event-log session-list session-list-full">
+        ${sessions.map((s) => {
+          const diff = s.history?.git?.thisSessionDiff
+            ? ` · ${s.history.git.thisSessionDiff.filesChanged} arch. (+${s.history.git.thisSessionDiff.insertions}/-${s.history.git.thisSessionDiff.deletions})`
+            : "";
+          return `<li><span class="cu-session-project">${timeAgoFmt(s.timestamp)} — ${s.agent ?? "--"}</span><span class="cu-session-meta">${s.finalState ?? "--"}${diff}${s.backfill ? " · histórico" : ""}</span></li>`;
+        }).join("")}
+      </ul>`;
+
+    pdOverlay.classList.remove("hidden");
+  }
 
   // --- Clock ---
   function tickClock() {
