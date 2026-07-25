@@ -1,24 +1,41 @@
 """Hybrid autonomy estimation.
 
-Auditoria de 2026-07-25 (10 min, 200 muestras, angel1 + angel2 — ver
-system/battery-audit/) mostro dos cosas: (1) el promedio movil de power_now es
-la fuente mas ESTABLE de las evaluadas (menor CV), pero (2) en algunos equipos
-(angel2) power_now puede quedarse congelado en un valor durante minutos
-mientras energy_now si sigue avanzando — ahi el promedio de power_now, por
-estable que sea, esta promediando un numero sesgado.
+Auditoria de 10 min (2026-07-25, angel1 + angel2 — ver system/battery-audit/)
+mostro que el promedio movil de power_now es la fuente mas ESTABLE de las
+evaluadas, y que en angel2 power_now se veia "congelado" (CV~0) durante toda
+esa ventana mientras energy_now si avanzaba.
+
+v1 de este modulo disparaba la calibracion solo si power_now estaba
+practicamente plano (CV<2%) Y divergia de la derivada. Una auditoria de
+seguimiento EN VIVO de 40 min (800 muestras) invalido esa condicion: en esa
+sesion mas larga, power_now en angel2 SI variaba (CV=3.3%, nunca "congelado")
+pero seguia sesgado 2.7x sobre la potencia real (delta de energia real:
+0.57W vs power_now reportando ~1.56W, sostenido durante los 40 minutos
+completos) — el chequeo de "congelado" nunca se disparo pese al sesgo real y
+persistente. Confundir "sin movimiento" con "impreciso" produce un falso
+negativo: un firmware puede ser estable pero incorrecto (angel2) o inestable
+pero correcto, y son cosas distintas que hay que medir por separado.
+
+v2 (esta version) dispara la calibracion por **divergencia sostenida**,
+sin importar si power_now tiene jitter o no: cada 5 minutos se calcula el
+error relativo entre power_now (promedio 30s) y la potencia real derivada
+del delta de energia; si ese error supera el 15% durante 3 ventanas
+consecutivas, se confirma. La varianza de power_now (CV) se sigue calculando
+y logueando como metrica de "estabilidad", pero es puramente informativa —
+ya no forma parte de la condicion de disparo.
 
 Este modulo no elige entre power_now o el delta de energia: usa power_now
 como base (Paso 1), y solo cuando confirma —durante varios ciclos de 5
-minutos, no en el primer indicio— que power_now esta "congelado" mientras
-energy_now se mueve, mezcla una fraccion del valor derivado del delta de
-energia (Paso 4). En cuanto power_now vuelve a mostrar variacion real, el
-modo revierte solo, sin intervencion manual por servidor (Paso 5).
+minutos, no en el primer indicio— que power_now diverge de forma sostenida
+de la energia real, mezcla una fraccion del valor derivado (Paso 4). En
+cuanto la divergencia deja de sostenerse, el modo revierte solo, sin
+intervencion manual por servidor (Paso 5).
 
 Etapas deliberadamente separadas (no todo en un metodo):
   calculate  -> rolling_power_avg30()      promedio movil de power_now (Paso 1)
   calibrate  -> evaluate()                 compara power_now vs delta-energia
                                             cada CHECK_INTERVAL_S, confirma
-                                            firmware inconsistente tras varios
+                                            divergencia sostenida tras varios
                                             ciclos (Pasos 2-3)
   decide     -> blended_power()            aplica el factor de calibracion
                                             solo si evaluate() lo confirmo
@@ -41,8 +58,7 @@ logger = logging.getLogger("dashboard")
 WINDOW_POWER_S = 30
 CHECK_INTERVAL_S = 300  # Paso 2: cada 5 minutos
 CONFIRM_CYCLES = 3  # Paso 3: "confirmarlo durante varios ciclos" -> 15 min
-STALE_CV_THRESHOLD = 0.02  # power_now varia <2% en la ventana => "congelado"
-DIVERGENCE_THRESHOLD = 0.15  # >15% de diferencia vs la derivada, algo anda mal
+DIVERGENCE_THRESHOLD = 0.15  # error > 15% vs la potencia real derivada, sostenido -> calibrar
 CALIBRATION_WEIGHT = 0.2  # Paso 4: 80% power_now_avg30 + 20% derivada
 
 
@@ -111,13 +127,20 @@ def _derived_power(state: HostAutonomyState) -> float | None:
 
 
 def evaluate(state: HostAutonomyState, now: float) -> dict | None:
-    """Paso 2/3: corre como maximo una vez cada CHECK_INTERVAL_S. Compara el
-    promedio de power_now contra la potencia derivada del delta de energia;
-    si power_now esta practicamente plano (CV bajo) mientras la derivada
-    diverge, cuenta un ciclo de sospecha. Solo tras CONFIRM_CYCLES ciclos
-    consecutivos se confirma firmware inconsistente — un unico ciclo raro no
-    basta (Paso 3: "no asumir inmediatamente que esta roto").
-    Devuelve None si aun no toca evaluar (nada que loguear)."""
+    """Paso 2/3 (v2 — disparador por divergencia sostenida, no por "congelado").
+
+    Corre como maximo una vez cada CHECK_INTERVAL_S. Calcula la confiabilidad
+    (error relativo entre el promedio de power_now y la potencia real
+    derivada del delta de energia) y, por separado, la estabilidad (CV de
+    power_now) — son dos cosas distintas: un firmware puede ser estable pero
+    incorrecto (caso real observado en angel2: CV=3.3%, jitea, pero sesgado
+    2.7x de forma sostenida) o inestable pero correcto. Solo la confiabilidad
+    decide la calibracion; la estabilidad es informativa (logs).
+
+    Si el error supera DIVERGENCE_THRESHOLD, cuenta un ciclo de sospecha.
+    Solo tras CONFIRM_CYCLES ciclos consecutivos se confirma divergencia
+    sostenida — un unico ciclo raro no basta (Paso 3: "no asumir
+    inmediatamente que esta roto"). Devuelve None si aun no toca evaluar."""
     if state.last_check_ts is not None and now - state.last_check_ts < CHECK_INTERVAL_S:
         return None
     span = state.energy_samples[-1][0] - state.energy_samples[0][0] if len(state.energy_samples) >= 2 else 0
@@ -127,23 +150,22 @@ def evaluate(state: HostAutonomyState, now: float) -> dict | None:
     state.last_check_ts = now
     power_values = [p for _, p in state.power_samples]
     power_avg = sum(power_values) / len(power_values) if power_values else None
-    power_cv = _cv(power_values)
+    power_cv = _cv(power_values)  # estabilidad, informativo — no gatilla nada
     derived = _derived_power(state)
 
-    frozen = power_cv is not None and power_cv < STALE_CV_THRESHOLD
-    diverges = bool(
-        power_avg and derived and power_avg > 0
-        and abs(power_avg - derived) / power_avg > DIVERGENCE_THRESHOLD
-    )
+    error = None
+    if power_avg is not None and derived and derived > 0:
+        error = abs(power_avg - derived) / derived
+    diverges = error is not None and error > DIVERGENCE_THRESHOLD
 
-    if frozen and diverges:
+    if diverges:
         state.stale_streak += 1
     else:
         state.stale_streak = 0
 
-    # Paso 5: en cuanto un ciclo deja de mostrar el patron, se sale de
-    # CALIBRATED/INCONSISTENT solo — no hay bandera "una vez roto, siempre
-    # calibrado". Ningun ajuste manual por servidor.
+    # Paso 5: en cuanto un ciclo deja de mostrar divergencia sostenida, se
+    # sale de CALIBRATED/INCONSISTENT solo — no hay bandera "una vez roto,
+    # siempre calibrado". Ningun ajuste manual por servidor.
     if state.stale_streak >= CONFIRM_CYCLES:
         state.mode = Mode.CALIBRATED
     elif state.stale_streak > 0:
@@ -153,15 +175,16 @@ def evaluate(state: HostAutonomyState, now: float) -> dict | None:
 
     result = {
         "mode": state.mode, "power_avg": power_avg, "power_cv": power_cv,
-        "derived_power": derived, "frozen": frozen, "diverges": diverges,
-        "stale_streak": state.stale_streak,
+        "derived_power": derived, "error_pct": error * 100 if error is not None else None,
+        "diverges": diverges, "stale_streak": state.stale_streak,
     }
     logger.info(
         "autonomy calibration check: mode=%s power_now_avg=%s derived=%s "
-        "cv=%s stale_streak=%d",
+        "error=%s cv(estabilidad)=%s stale_streak=%d",
         state.mode.value,
         f"{power_avg:.2f}W" if power_avg else "NA",
         f"{derived:.2f}W" if derived else "NA",
+        f"{error*100:.1f}%" if error is not None else "NA",
         f"{power_cv:.3f}" if power_cv is not None else "NA",
         state.stale_streak,
     )

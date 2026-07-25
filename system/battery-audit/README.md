@@ -27,16 +27,19 @@ consume su salida normalizada (`power_now_w`, `energy_now_wh`,
 `energy_full_wh`), por lo que funciona igual sin importar el formato de
 origen.
 
-### Deteccion de firmware defectuoso (Paso 3)
+### Deteccion de firmware defectuoso (Paso 3) — v2
 
-Cada ciclo de 5 minutos (`CHECK_INTERVAL_S`), si `power_now` vario menos del
-2% (`STALE_CV_THRESHOLD`) en la ventana **y** difiere mas del 15%
-(`DIVERGENCE_THRESHOLD`) de la potencia derivada, cuenta como un ciclo de
-sospecha (`stale_streak += 1`); si no, `stale_streak` vuelve a 0 de inmediato.
-Solo tras **3 ciclos consecutivos** (`CONFIRM_CYCLES`, 15 minutos) se confirma
-el modo `calibrado` — un unico ciclo raro no activa nada (modo intermedio
+Cada ciclo de 5 minutos (`CHECK_INTERVAL_S`), se calcula el error relativo
+entre `power_now` promediado a 30s y la potencia derivada del delta de
+energia (`error = |power_now_avg30 - derivada| / derivada`). Si supera 15%
+(`DIVERGENCE_THRESHOLD`), cuenta como un ciclo de sospecha
+(`stale_streak += 1`); si no, `stale_streak` vuelve a 0 de inmediato. Solo
+tras **3 ciclos consecutivos** (`CONFIRM_CYCLES`, 15 minutos) se confirma el
+modo `calibrado` — un unico ciclo raro no activa nada (modo intermedio
 `firmware_inconsistente`, visible en logs pero sin afectar el numero
-mostrado).
+mostrado). **No importa si `power_now` tiene jitter o esta perfectamente
+plano** — ver seccion "v2 del disparador" abajo para el porque de este
+cambio respecto a la version original.
 
 ### Factor de calibracion (Paso 4)
 
@@ -100,6 +103,38 @@ la potencia real, y ahi el hibrido gana 10.1% en el escenario exacto para el
 que fue diseñado, sin ningun costo en el host sano.
 
 Reproducir: `python system/battery-audit/simulate_hybrid.py`
+
+## v2 del disparador (post auditoria en vivo de 40 min)
+
+Una auditoria de seguimiento EN VIVO (SSH directo, 40 min, 800 muestras/host,
+no simulada) invalido la condicion original: en esa sesion mas larga,
+`power_now` en angel2 **si variaba** (CV=3.3%, nunca "congelado" segun el
+umbral `CV<2%`) pero seguia sesgado **2.7x** sobre la potencia real (0.57W
+reales vs ~1.56W reportados, sostenido los 40 min completos) — la condicion
+`frozen AND diverges` nunca se disparo pese al sesgo real y persistente.
+
+**v2 reemplaza el disparador**: ya no exige que `power_now` este "congelado"
+(se elimino `STALE_CV_THRESHOLD`/el chequeo de CV como condicion). Ahora
+dispara por **divergencia sostenida**: cada 5 min, `error = |power_now_avg30
+- power_derivada| / power_derivada`; si supera 15% durante 3 ciclos
+consecutivos, calibra. La CV de `power_now` se sigue calculando y logueando,
+pero solo como metrica de "estabilidad" informativa — la decision la toma
+exclusivamente el error de "confiabilidad" contra la energia real. Estabilidad
+e incorrectitud son dos cosas distintas (un firmware puede ser estable pero
+incorrecto, o inestable pero correcto) y ahora se evaluan por separado.
+
+Validado contra los datos de la auditoria en vivo (`system/battery-audit/`
+no incluye los 40 min crudos por tamaño, ver la conversacion original para
+las rutas): angel2 paso de nunca disparar ninguna sospecha (v1) a marcar
+`firmware_inconsistente` en 100/800 muestras, con un error medido de 66%
+en el primer ciclo detectado — muy por encima del umbral. No llego a
+`calibrado` dentro de la ventana de 40 min porque la potencia derivada de
+una sola ventana de 5 min es ruidosa (quantizacion de `energy_now`, mismo
+efecto ya documentado en la seccion de arriba) y no sostuvo 3 ciclos
+consecutivos por encima del 15% en esa sesion puntual — en un despliegue
+continuo (horas, no 40 min) el sesgo persistente deberia eventualmente
+acumular 3 ciclos consecutivos. angel1 (host sano) se mantuvo 100% en modo
+`normal` durante toda la sesion de 40 min real — cero falsos positivos.
 
 ## Archivos
 
