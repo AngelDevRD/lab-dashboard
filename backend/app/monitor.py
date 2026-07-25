@@ -6,12 +6,11 @@ from datetime import date
 
 from . import config, events
 from .alerts.service import notification_service
+from .collectors import autonomy
 from .collectors.collector import collect_internet, collect_server
 from .ssh_client import pool
 
 logger = logging.getLogger("dashboard")
-
-POWER_BUFFER_LEN = 120  # ~6 min at POLL_INTERVAL=3s
 
 
 class Monitor:
@@ -27,7 +26,7 @@ class Monitor:
         self._daily_baseline: dict[str, tuple[str, int, int]] = {}
         self._cpu_history: dict[str, deque] = {}
         self._mem_history: dict[str, deque] = {}
-        self._power_buffer: dict[str, deque] = {}
+        self._autonomy_state: dict[str, autonomy.HostAutonomyState] = {}
         self._server_order: list[str] = []
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
@@ -97,10 +96,10 @@ class Monitor:
         cpu_hist.append(cpu_pct)
         mem_hist.append(mem_pct)
 
-        power_w = snapshot.get("power", {}).get("power_now_w")
-        if power_w is not None and power_w > 0:
-            buf = self._power_buffer.setdefault(host, deque(maxlen=POWER_BUFFER_LEN))
-            buf.append(power_w)
+        pwr = snapshot.get("power") or {}
+        if pwr.get("available"):
+            state = self._autonomy_state.setdefault(host, autonomy.HostAutonomyState())
+            autonomy.record_sample(state, time.time(), pwr.get("power_now_w"), pwr.get("energy_now_wh"))
 
     def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
         net = snapshot.get("net", {})
@@ -219,21 +218,18 @@ class Monitor:
                 "cpu": list(self._cpu_history.get(h, [])),
                 "mem": list(self._mem_history.get(h, [])),
             }
-            buf = self._power_buffer.get(h)
-            if buf and len(buf) >= 3:
-                avg_power = sum(buf) / len(buf)
-                pwr = s.get("power")
-                if pwr and pwr.get("available") and avg_power > 0:
-                    e_now = pwr.get("energy_now_wh")
-                    e_full = pwr.get("energy_full_wh")
-                    st = pwr.get("status")
-                    new_sec = None
-                    if st == "Discharging" and e_now and e_now > 0:
-                        new_sec = round((e_now / avg_power) * 3600)
-                    elif st == "Charging" and e_full and e_now is not None and e_full > 0 and e_now < e_full:
-                        new_sec = round(((e_full - e_now) / avg_power) * 3600)
-                    if new_sec is not None:
-                        s["power"] = {**pwr, "autonomy_seconds": new_sec}
+            state = self._autonomy_state.get(h)
+            pwr = s.get("power")
+            if state and pwr and pwr.get("available"):
+                result = autonomy.estimate(
+                    state, pwr.get("status"), pwr.get("energy_now_wh"), pwr.get("energy_full_wh")
+                )
+                if result["autonomy_seconds"] is not None:
+                    s["power"] = {
+                        **pwr,
+                        "autonomy_seconds": result["autonomy_seconds"],
+                        "autonomy_mode": result["mode"],
+                    }
             servers.append(s)
         online_count = sum(1 for s in servers if s.get("online"))
         return {
