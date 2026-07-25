@@ -54,3 +54,26 @@ INTERNET_COMMANDS = {
     "ping_google": "ping -c 1 -W 2 8.8.8.8 2>/dev/null | tail -1",
     "ping_cloudflare": "ping -c 1 -W 2 1.1.1.1 2>/dev/null | tail -1",
 }
+
+# "Información avanzada" del panel de detalles — solo se ejecutan bajo demanda
+# (endpoint /api/servers/{host}/advanced), nunca en el loop de polling continuo.
+# Ping acotado a -c 2 -W 1 (~2s peor caso) para no acaparar el lock de la
+# conexión SSH compartida con el loop principal por mas tiempo del necesario.
+ADVANCED_COMMANDS = {
+    "cpu_freq": (
+        "awk '/cpu MHz/{s+=$4;n++} END{if(n>0) printf \"%.0f\", s/n}' /proc/cpuinfo; echo; "
+        "cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null || "
+        "cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq 2>/dev/null"
+    ),
+    "disk_stats": "cat /proc/diskstats",
+    "smart": "smartctl -a /dev/sda 2>/dev/null",
+    "docker_stats": (
+        "docker stats --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}' 2>/dev/null || echo '__NO_DOCKER__'"
+    ),
+    "ping_loss": "ping -c 2 -W 1 8.8.8.8 2>/dev/null",
+    "tailscale_ip": "tailscale ip -4 2>/dev/null",
+    "system_info": (
+        "(lsb_release -ds 2>/dev/null || (. /etc/os-release 2>/dev/null; echo \"$PRETTY_NAME\")); "
+        "uname -r; uname -m; uptime -s 2>/dev/null"
+    ),
+}

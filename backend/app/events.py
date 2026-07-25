@@ -32,8 +32,8 @@ def _write_event(event: dict) -> None:
         logger.error("No se pudo escribir al log %s: %s", config.LOG_FILE, exc)
 
 
-def log_event(kind: str, message: str) -> None:
-    event = {"time": time.time(), "kind": kind, "message": message}
+def log_event(kind: str, message: str, host: str | None = None) -> None:
+    event = {"time": time.time(), "kind": kind, "message": message, "host": host}
     _recent.appendleft(event)
     try:
         loop = asyncio.get_running_loop()

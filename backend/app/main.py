@@ -18,11 +18,13 @@ from . import config
 from .alerts.center import alert_center
 from .alerts.service import notification_service
 from .alerts.thresholds import threshold_manager
+from .collectors import advanced as advanced_collector
 from .collectors import claude_usage, framework_telemetry
 from .collectors.claude_usage import ClaudeUsagePush
 from .collectors.framework_telemetry import FrameworkTelemetryReport
 from .models import HealthResponse, StatusResponse
 from .monitor import monitor
+from .ssh_client import pool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("dashboard")
@@ -286,6 +288,34 @@ async def report_framework_telemetry(
 @app.get("/api/framework-telemetry")
 async def get_framework_telemetry():
     return framework_telemetry.summary()
+
+
+@app.get("/api/servers/{host}/advanced")
+@limiter.limit("2/second")
+async def get_server_advanced(host: str, request: Request):
+    """Información avanzada del panel de detalles — fetch bajo demanda, solo
+    mientras el panel de ese servidor está abierto (ver frontend). No forma
+    parte del snapshot que se difunde por WebSocket."""
+    server = next((s for s in config.load_servers() if s["host"] == host), None)
+    if not server:
+        return JSONResponse(status_code=404, content={"detail": "server not found"})
+    status = monitor.get_server_status(host)
+    if not status or not status.get("online"):
+        return JSONResponse(status_code=503, content={"detail": "server offline"})
+
+    conn = pool.get(server)
+    data = await advanced_collector.collect_advanced(host, conn)
+
+    power = status.get("power") or {}
+    mode = monitor.get_autonomy_mode(host)
+    data["power_method"] = (
+        "estimacion"
+        if power.get("available") and mode == "calibrado"
+        else "sensor"
+        if power.get("available")
+        else None
+    )
+    return data
 
 
 @app.get("/api/autonomy/metrics")

@@ -11,6 +11,7 @@
   const autoState = new Map();
   let selectedHost = null;
   let latestServers = new Map();
+  let latestEvents = [];
   let firstRender = true;
 
   const bytesFmt = (n) => {
@@ -33,6 +34,12 @@
     if (refs.last[key] === html) return;
     refs.last[key] = html;
     refs.el[key].innerHTML = html;
+  }
+
+  function setBadge(refs, key, visible) {
+    if (refs.last[key] === visible) return;
+    refs.last[key] = visible;
+    refs.el[key].classList.toggle("hidden", !visible);
   }
 
   function setBar(refs, key, pct) {
@@ -166,7 +173,10 @@
         diskBar: el.querySelector(".disk-bar"),
         temp: el.querySelector(".cpu-temp"),
         power: el.querySelector(".power-value"),
+        powerWatts: el.querySelector(".power-watts"),
         docker: el.querySelector(".docker-summary"),
+        hdrDocker: el.querySelector(".hdr-docker"),
+        hdrBattery: el.querySelector(".hdr-battery"),
         uptime: el.querySelector(".uptime"),
         latency: el.querySelector(".latency"),
         wifiNetwork: el.querySelector(".wifi-network"),
@@ -219,12 +229,15 @@
       setBar(refs, "diskBar", 0);
       setText(refs, "temp", "--");
       setText(refs, "power", "--");
+      setText(refs, "powerWatts", "--");
       setText(refs, "docker", "--");
       setText(refs, "uptime", "Offline");
       setText(refs, "latency", "");
       setText(refs, "wifiNetwork", "--");
       setText(refs, "wifiPing", "");
       setText(refs, "autonomy", "--");
+      setBadge(refs, "hdrDocker", false);
+      setBadge(refs, "hdrBattery", false);
       autoState.delete(s.host);
       const offCtx = refs.el.sparkline.getContext("2d");
       if (offCtx) offCtx.clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
@@ -270,9 +283,12 @@
     } else {
       setText(refs, "power", "--");
     }
+    setText(refs, "powerWatts", power.available && power.power_now_w != null ? `${power.power_now_w.toFixed(1)}W` : "--");
+    setBadge(refs, "hdrBattery", power.available && (power.status || "").toLowerCase() === "discharging");
 
     const docker = s.docker || {};
     setText(refs, "docker", docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--");
+    setBadge(refs, "hdrDocker", docker.available && docker.running > 0);
 
     setText(refs, "uptime", s.uptime?.pretty || "--");
     setText(refs, "latency", s.latency_ms != null ? `${s.latency_ms} ms` : "");
@@ -353,18 +369,107 @@
     }
   }
 
+  // --- Panel de detalles: "Información avanzada" bajo demanda ---
+  // Solo se pide mientras el panel está abierto, cada 5s; se corta al cerrar.
+  let advancedTimer = null;
+  let advancedInFlight = false;
+
+  const ADV_FIELD_IDS = [
+    "adv-cpu-freq", "adv-cpu-freq-max", "adv-disk-io", "adv-disk-smart",
+    "adv-docker-cpu", "adv-docker-mem", "adv-net-latency", "adv-net-loss",
+    "adv-net-tailscale", "adv-sys-os", "adv-sys-kernel", "adv-sys-arch",
+    "adv-sys-boot", "adv-power-method",
+  ];
+
+  function setAdvField(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function renderAdvancedPlaceholder(text) {
+    for (const id of ADV_FIELD_IDS) setAdvField(id, text);
+  }
+
+  function renderAdvanced(data) {
+    const freq = data.cpu_freq || {};
+    setAdvField("adv-cpu-freq", freq.current_mhz != null ? `${freq.current_mhz} MHz` : "--");
+    setAdvField("adv-cpu-freq-max", freq.max_mhz != null ? `${freq.max_mhz} MHz` : "--");
+
+    const io = data.disk_io;
+    setAdvField("adv-disk-io", io ? `↓ ${bpsFmt(io.read_bps)} ↑ ${bpsFmt(io.write_bps)}` : "--");
+
+    const smartLabels = { ok: "OK", warning: "Advertencia", error: "Error" };
+    setAdvField("adv-disk-smart", data.disk_smart ? (smartLabels[data.disk_smart] || "--") : "--");
+
+    const ds = data.docker_stats;
+    setAdvField("adv-docker-cpu", ds ? `${ds.cpu_percent}%` : "--");
+    setAdvField("adv-docker-mem", ds ? bytesFmt(ds.mem_used_bytes) : "--");
+
+    const net = data.network_extra || {};
+    setAdvField("adv-net-latency", net.latency_ms != null ? `${net.latency_ms} ms` : "--");
+    setAdvField("adv-net-loss", net.loss_pct != null ? `${net.loss_pct}%` : "--");
+    setAdvField("adv-net-tailscale", net.tailscale_ip || "--");
+
+    const sys = data.system || {};
+    setAdvField("adv-sys-os", sys.os_pretty || "--");
+    setAdvField("adv-sys-kernel", sys.kernel || "--");
+    setAdvField("adv-sys-arch", sys.arch || "--");
+    setAdvField("adv-sys-boot", sys.boot_at ? new Date(sys.boot_at * 1000).toLocaleString() : "--");
+
+    const methodLabels = { sensor: "Sensor del sistema (batería)", estimacion: "Estimación (auto-calibración)" };
+    setAdvField("adv-power-method", data.power_method ? (methodLabels[data.power_method] || data.power_method) : "--");
+  }
+
+  async function fetchAdvanced(host) {
+    if (advancedInFlight) return;
+    advancedInFlight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(`/api/servers/${encodeURIComponent(host)}/advanced`, { signal: controller.signal });
+      if (host !== selectedHost) return; // panel cerrado/cambiado mientras esperábamos
+      if (!res.ok) { renderAdvancedPlaceholder("--"); return; }
+      renderAdvanced(await res.json());
+    } catch (_) {
+      if (host === selectedHost) renderAdvancedPlaceholder("--");
+    } finally {
+      clearTimeout(timeout);
+      advancedInFlight = false;
+    }
+  }
+
+  function stopAdvancedPolling() {
+    if (advancedTimer) clearInterval(advancedTimer);
+    advancedTimer = null;
+  }
+
+  function startAdvancedPolling(host) {
+    stopAdvancedPolling();
+    renderAdvancedPlaceholder("cargando…");
+    fetchAdvanced(host);
+    advancedTimer = setInterval(() => fetchAdvanced(host), 5000);
+  }
+
   function openDetail(host) {
     selectedHost = host;
     document.getElementById("detail-overlay").classList.remove("hidden");
     const s = latestServers.get(host);
     if (s) renderDetail(s);
+    startAdvancedPolling(host);
     for (const [h, refs] of cards) refs.card.classList.toggle("selected", h === host);
   }
 
   function closeDetail() {
     selectedHost = null;
+    stopAdvancedPolling();
     document.getElementById("detail-overlay").classList.add("hidden");
     for (const refs of cards.values()) refs.card.classList.remove("selected");
+  }
+
+  function serviceStateClass(state) {
+    if (state === "active") return "";
+    if (state === "activating" || state === "reloading") return " warn";
+    return " down";
   }
 
   function renderDetail(s) {
@@ -373,16 +478,19 @@
     document.getElementById("detail-uptime").textContent = s.uptime?.pretty || "--";
     document.getElementById("detail-load").textContent =
       `${s.load?.load1 ?? "--"} / ${s.load?.load5 ?? "--"} / ${s.load?.load15 ?? "--"}`;
-    document.getElementById("detail-latency").textContent = s.latency_ms != null ? `${s.latency_ms} ms` : "--";
+    document.getElementById("detail-cpu-cores").textContent = s.cpu?.cores ?? "--";
     document.getElementById("detail-ip").textContent = s.net?.ip || "--";
     document.getElementById("detail-net").textContent = `${bpsFmt(s.net?.download_bps)} / ${bpsFmt(s.net?.upload_bps)}`;
     document.getElementById("detail-traffic").textContent =
       `↓ ${bytesFmt(s.net?.daily_download_bytes)} ↑ ${bytesFmt(s.net?.daily_upload_bytes)}`;
     document.getElementById("detail-mem").textContent = `${bytesFmt(s.mem?.used)} / ${bytesFmt(s.mem?.total)}`;
+    document.getElementById("detail-mem-cache").textContent = bytesFmt(s.mem?.cache);
+    document.getElementById("detail-mem-buffers").textContent = bytesFmt(s.mem?.buffers);
     const swap = s.mem?.swap;
     document.getElementById("detail-swap").textContent =
       swap && swap.total ? `${bytesFmt(swap.used)} / ${bytesFmt(swap.total)} (${swap.percent}%)` : "sin uso";
     document.getElementById("detail-disk").textContent = `${bytesFmt(s.disk?.used)} / ${bytesFmt(s.disk?.total)}`;
+    document.getElementById("detail-disk-temp").textContent = s.disk_temp != null ? `${s.disk_temp}°C` : "--";
     document.getElementById("detail-docker-disk").textContent = s.docker_disk
       ? bytesFmt(s.docker_disk.total_bytes)
       : "--";
@@ -390,6 +498,16 @@
       s.updates_pending > 0 ? `${s.updates_pending} pendientes` : "Al día";
     document.getElementById("detail-temp-cores").textContent =
       s.cpu?.temp_per_core?.length ? s.cpu.temp_per_core.map((t) => `${t}°C`).join(" · ") : "--";
+
+    const power = s.power || {};
+    document.getElementById("adv-power-now").textContent =
+      power.available && power.power_now_w != null ? `${power.power_now_w.toFixed(1)}W` : "--";
+    document.getElementById("detail-last-update").textContent =
+      s.last_update ? new Date(s.last_update * 1000).toLocaleTimeString() : "--";
+
+    const docker = s.docker || {};
+    document.getElementById("detail-docker-count").textContent =
+      docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--";
 
     const net = s.network || {};
     document.getElementById("detail-wifi-network").textContent = net.available ? (net.current_network || "Sin red") : "--";
@@ -403,16 +521,18 @@
 
     const svcGrid = document.getElementById("detail-services");
     svcGrid.innerHTML = "";
-    for (const [name, active] of Object.entries(s.services || {})) {
+    for (const [name, state] of Object.entries(s.services || {})) {
       const chip = document.createElement("span");
-      chip.className = `service-chip${active ? "" : " down"}`;
+      chip.className = `service-chip${serviceStateClass(state)}`;
+      chip.title = state;
       chip.textContent = name;
       svcGrid.appendChild(chip);
     }
 
+    renderDetailEvents(s.host);
+
     const containerList = document.getElementById("detail-containers");
     containerList.textContent = "";
-    const docker = s.docker || {};
     if (!docker.available) {
       const li = document.createElement("li");
       li.textContent = "No disponible";
@@ -488,8 +608,7 @@
     }
   }
 
-  function renderEvents(events) {
-    const ul = document.getElementById("event-log");
+  function renderEventItems(ul, events) {
     ul.textContent = "";
     for (const ev of events) {
       const li = document.createElement("li");
@@ -505,6 +624,25 @@
       li.appendChild(msgSpan);
       ul.appendChild(li);
     }
+  }
+
+  function renderEvents(events) {
+    renderEventItems(document.getElementById("event-log"), events);
+  }
+
+  // Eventos propios de un servidor + eventos globales (internet caído/OK),
+  // que aplican a todos los paneles por igual. Solo los últimos 10.
+  function renderDetailEvents(host) {
+    const filtered = latestEvents.filter((ev) => ev.host == null || ev.host === host).slice(0, 10);
+    const ul = document.getElementById("detail-events");
+    if (!filtered.length) {
+      ul.textContent = "";
+      const li = document.createElement("li");
+      li.textContent = "Sin eventos recientes";
+      ul.appendChild(li);
+      return;
+    }
+    renderEventItems(ul, filtered);
   }
 
   function renderAlerts(alerts) {
@@ -551,7 +689,8 @@
     renderSummary(data);
     renderInternet(data.internet);
     renderConnectivity(data.connectivity);
-    renderEvents(data.events);
+    latestEvents = data.events || [];
+    renderEvents(latestEvents);
     renderAlerts(data.alerts || []);
     const count = data.servers ? data.servers.length : 0;
     grid.classList.remove(

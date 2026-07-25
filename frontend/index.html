@@ -179,6 +179,8 @@
         <div class="server-title">
           <span class="status-dot"></span>
           <h2 class="server-name">--</h2>
+          <span class="hdr-badge hdr-docker hidden" title="Docker corriendo">🐳</span>
+          <span class="hdr-badge hdr-battery hidden" title="En batería">⚡</span>
         </div>
         <span class="status-text">--</span>
       </div>
@@ -211,23 +213,27 @@
 
       <div class="mini-stats">
         <div class="mini">
-          <span class="mini-label">Temp</span>
+          <span class="mini-label" title="Temperatura CPU">🌡️</span>
           <span class="mini-value cpu-temp">--</span>
         </div>
         <div class="mini">
-          <span class="mini-label">Energía</span>
+          <span class="mini-label" title="Consumo actual">⚡</span>
+          <span class="mini-value power-watts">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label" title="Batería">🔋</span>
           <span class="mini-value power-value">--</span>
         </div>
         <div class="mini">
-          <span class="mini-label">Docker</span>
+          <span class="mini-label" title="Docker">🐳</span>
           <span class="mini-value docker-summary">--</span>
         </div>
         <div class="mini">
-          <span class="mini-label">Red WiFi</span>
+          <span class="mini-label" title="Red WiFi">📶</span>
           <span class="mini-value wifi-network">--</span>
         </div>
         <div class="mini">
-          <span class="mini-label">Autonomía</span>
+          <span class="mini-label" title="Autonomía">⏳</span>
           <span class="mini-value autonomy-value">--</span>
         </div>
       </div>
@@ -257,43 +263,118 @@
         <button id="detail-close" class="icon-btn">✕</button>
       </div>
       <div class="detail-body">
-        <div class="detail-grid">
-          <div><span class="label">Uptime</span><span class="value" id="detail-uptime">--</span></div>
-          <div><span class="label">Load</span><span class="value" id="detail-load">--</span></div>
-          <div><span class="label">Latencia</span><span class="value" id="detail-latency">--</span></div>
-          <div><span class="label">IP</span><span class="value" id="detail-ip">--</span></div>
-          <div><span class="label">↓ / ↑</span><span class="value" id="detail-net">--</span></div>
-          <div><span class="label">Hoy</span><span class="value" id="detail-traffic">--</span></div>
-          <div><span class="label">RAM</span><span class="value" id="detail-mem">--</span></div>
-          <div><span class="label">Swap</span><span class="value" id="detail-swap">--</span></div>
-          <div><span class="label">Disco</span><span class="value" id="detail-disk">--</span></div>
-          <div><span class="label">Disco Docker</span><span class="value" id="detail-docker-disk">--</span></div>
-          <div><span class="label">Actualizaciones</span><span class="value" id="detail-updates">--</span></div>
-          <div><span class="label">Temp por núcleo</span><span class="value" id="detail-temp-cores">--</span></div>
-          <div><span class="label">Red WiFi</span><span class="value" id="detail-wifi-network">--</span></div>
-          <div><span class="label">Intensidad</span><span class="value" id="detail-wifi-rssi">--</span></div>
-          <div><span class="label">Link speed</span><span class="value" id="detail-wifi-linkspeed">--</span></div>
-          <div><span class="label">Ping WiFi</span><span class="value" id="detail-wifi-ping">--</span></div>
-          <div><span class="label">Conectado desde</span><span class="value" id="detail-wifi-since">--</span></div>
-          <div><span class="label">Último failover</span><span class="value" id="detail-wifi-failover">--</span></div>
-        </div>
 
-        <h3>Servicios</h3>
-        <div class="services-grid" id="detail-services"></div>
-
-        <h3>Contenedores Docker</h3>
-        <ul class="container-list" id="detail-containers"></ul>
-
-        <div class="procs-block">
-          <div class="procs-col">
-            <span class="procs-title">Top CPU</span>
-            <ul id="detail-top-cpu"></ul>
+        <section class="detail-section">
+          <h3>⚡ Energía</h3>
+          <div class="detail-grid">
+            <div><span class="label">Consumo actual</span><span class="value" id="adv-power-now">--</span></div>
+            <div><span class="label">Método</span><span class="value" id="adv-power-method">--</span></div>
+            <div><span class="label">Última actualización</span><span class="value" id="detail-last-update">--</span></div>
           </div>
-          <div class="procs-col">
-            <span class="procs-title">Top RAM</span>
-            <ul id="detail-top-mem"></ul>
+        </section>
+
+        <section class="detail-section">
+          <h3>CPU</h3>
+          <div class="detail-grid">
+            <div><span class="label">Load average (1/5/15)</span><span class="value" id="detail-load">--</span></div>
+            <div><span class="label">Frecuencia actual</span><span class="value" id="adv-cpu-freq">--</span></div>
+            <div><span class="label">Frecuencia máxima</span><span class="value" id="adv-cpu-freq-max">--</span></div>
+            <div><span class="label">Núcleos</span><span class="value" id="detail-cpu-cores">--</span></div>
+            <div><span class="label">Temperatura</span><span class="value" id="detail-temp-cores">--</span></div>
+            <div><span class="label">Tiempo activo</span><span class="value" id="detail-uptime">--</span></div>
           </div>
-        </div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Memoria</h3>
+          <div class="detail-grid">
+            <div><span class="label">RAM usada / total</span><span class="value" id="detail-mem">--</span></div>
+            <div><span class="label">Caché</span><span class="value" id="detail-mem-cache">--</span></div>
+            <div><span class="label">Buffers</span><span class="value" id="detail-mem-buffers">--</span></div>
+            <div><span class="label">Swap</span><span class="value" id="detail-swap">--</span></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Disco</h3>
+          <div class="detail-grid">
+            <div><span class="label">Espacio usado / total</span><span class="value" id="detail-disk">--</span></div>
+            <div><span class="label">I/O actual</span><span class="value" id="adv-disk-io">--</span></div>
+            <div><span class="label">Temp. SSD</span><span class="value" id="detail-disk-temp">--</span></div>
+            <div><span class="label">Estado SMART</span><span class="value" id="adv-disk-smart">--</span></div>
+            <div><span class="label">Disco Docker</span><span class="value" id="detail-docker-disk">--</span></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Docker</h3>
+          <div class="detail-grid">
+            <div><span class="label">Contenedores</span><span class="value" id="detail-docker-count">--</span></div>
+            <div><span class="label">CPU total</span><span class="value" id="adv-docker-cpu">--</span></div>
+            <div><span class="label">RAM total</span><span class="value" id="adv-docker-mem">--</span></div>
+          </div>
+          <ul class="container-list" id="detail-containers"></ul>
+        </section>
+
+        <section class="detail-section">
+          <h3>Red</h3>
+          <div class="detail-grid">
+            <div><span class="label">↓ / ↑</span><span class="value" id="detail-net">--</span></div>
+            <div><span class="label">Hoy</span><span class="value" id="detail-traffic">--</span></div>
+            <div><span class="label">Latencia</span><span class="value" id="adv-net-latency">--</span></div>
+            <div><span class="label">Pérdida de paquetes</span><span class="value" id="adv-net-loss">--</span></div>
+            <div><span class="label">IP local</span><span class="value" id="detail-ip">--</span></div>
+            <div><span class="label">IP Tailscale</span><span class="value" id="adv-net-tailscale">--</span></div>
+          </div>
+        </section>
+
+        <section class="detail-section" id="detail-wifi-section">
+          <h3>Red WiFi</h3>
+          <div class="detail-grid">
+            <div><span class="label">Red</span><span class="value" id="detail-wifi-network">--</span></div>
+            <div><span class="label">Intensidad</span><span class="value" id="detail-wifi-rssi">--</span></div>
+            <div><span class="label">Link speed</span><span class="value" id="detail-wifi-linkspeed">--</span></div>
+            <div><span class="label">Ping</span><span class="value" id="detail-wifi-ping">--</span></div>
+            <div><span class="label">Conectado desde</span><span class="value" id="detail-wifi-since">--</span></div>
+            <div><span class="label">Último failover</span><span class="value" id="detail-wifi-failover">--</span></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Sistema</h3>
+          <div class="detail-grid">
+            <div><span class="label">Ubuntu</span><span class="value" id="adv-sys-os">--</span></div>
+            <div><span class="label">Kernel</span><span class="value" id="adv-sys-kernel">--</span></div>
+            <div><span class="label">Arquitectura</span><span class="value" id="adv-sys-arch">--</span></div>
+            <div><span class="label">Actualizaciones</span><span class="value" id="detail-updates">--</span></div>
+            <div><span class="label">Último reinicio</span><span class="value" id="adv-sys-boot">--</span></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Servicios</h3>
+          <div class="services-grid" id="detail-services"></div>
+        </section>
+
+        <section class="detail-section">
+          <h3>Eventos recientes</h3>
+          <ul class="event-log" id="detail-events"></ul>
+        </section>
+
+        <section class="detail-section">
+          <h3>Procesos</h3>
+          <div class="procs-block">
+            <div class="procs-col">
+              <span class="procs-title">Top CPU</span>
+              <ul id="detail-top-cpu"></ul>
+            </div>
+            <div class="procs-col">
+              <span class="procs-title">Top RAM</span>
+              <ul id="detail-top-mem"></ul>
+            </div>
+          </div>
+        </section>
+
       </div>
     </div>
   </div>

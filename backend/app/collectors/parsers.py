@@ -2,6 +2,7 @@
 
 import json
 import re
+from datetime import datetime
 
 
 def parse_uptime(raw: str) -> dict:
@@ -108,7 +109,9 @@ def parse_mem(raw: str) -> dict:
         "used": used,
         "free": available,
         "percent": percent,
-        "swap": {"total": swap_total, "used": swap_used, "percent": swap_percent},
+        "cache": info.get("Cached", 0),
+        "buffers": info.get("Buffers", 0),
+        "swap": {"total": swap_total, "used": swap_used, "free": swap_free, "percent": swap_percent},
     }
 
 
@@ -181,11 +184,12 @@ def parse_docker(raw: str) -> dict:
 
 
 def parse_services(raw: str, service_names: list[str]) -> dict:
+    """Returns {name: raw systemctl state} (active/activating/failed/inactive/unknown)
+    instead of a bool, so the UI can tell "restarting" apart from "down"."""
     lines = raw.strip().splitlines()
     result = {}
     for i, name in enumerate(service_names):
-        state = lines[i].strip() if i < len(lines) else "unknown"
-        result[name] = state == "active"
+        result[name] = lines[i].strip() if i < len(lines) else "unknown"
     return result
 
 
@@ -344,3 +348,134 @@ def parse_network_status(raw: str) -> dict:
     if not isinstance(data, dict) or not data:
         return default
     return {"available": True, **data}
+
+
+# ---------------------------------------------------------------------------
+# "Información avanzada" (collectors/advanced.py) — fetched on demand only
+# when a server's detail panel is open, never part of the continuous poll.
+# ---------------------------------------------------------------------------
+
+def parse_cpu_freq(raw: str) -> dict:
+    lines = raw.strip().splitlines()
+    current = None
+    maximum = None
+    if lines and lines[0].strip():
+        try:
+            current = round(float(lines[0].strip()))
+        except ValueError:
+            current = None
+    if len(lines) > 1 and lines[1].strip().isdigit():
+        maximum = round(int(lines[1].strip()) / 1000)  # kHz -> MHz
+    return {"current_mhz": current, "max_mhz": maximum}
+
+
+_prev_disk_io_samples: dict[str, tuple[float, int, int]] = {}
+
+
+def _is_whole_disk(name: str) -> bool:
+    if re.match(r"^(sd|vd|hd)[a-z]+$", name):
+        return True
+    if re.match(r"^(nvme\d+n\d+|mmcblk\d+)$", name):
+        return True
+    return False
+
+
+def parse_disk_io(raw: str, host: str, now: float) -> dict | None:
+    """Delta-based, like parse_net_io — first sample has no rate yet (None)."""
+    read_sectors = write_sectors = 0
+    for line in raw.strip().splitlines():
+        parts = line.split()
+        if len(parts) < 10 or not _is_whole_disk(parts[2]):
+            continue
+        read_sectors += int(parts[5])
+        write_sectors += int(parts[9])
+    read_bytes = read_sectors * 512
+    write_bytes = write_sectors * 512
+
+    prev = _prev_disk_io_samples.get(host)
+    _prev_disk_io_samples[host] = (now, read_bytes, write_bytes)
+    if not prev:
+        return None
+    prev_time, prev_read, prev_write = prev
+    dt = max(now - prev_time, 0.001)
+    return {
+        "read_bps": round(max(0, (read_bytes - prev_read) / dt)),
+        "write_bps": round(max(0, (write_bytes - prev_write) / dt)),
+    }
+
+
+def parse_smart_health(raw: str) -> str | None:
+    """Reads only the actual health-assessment line. smartctl often needs root
+    and prints "Permission denied" / "open device ... failed" otherwise — that
+    text contains the word "failed" too, so matching it loosely would report a
+    disk failure that isn't real. None means "couldn't determine", not "bad"."""
+    m = re.search(r"overall-health self-assessment test result:\s*(\S+)", raw, re.IGNORECASE)
+    if not m:
+        return None
+    result = m.group(1).upper()
+    if result == "PASSED":
+        return "ok"
+    if result == "FAILED":
+        return "error"
+    return "warning"
+
+
+def parse_docker_stats(raw: str) -> dict | None:
+    raw = raw.strip()
+    if not raw or raw == "__NO_DOCKER__":
+        return None
+    cpu_total = 0.0
+    mem_total = 0.0
+    count = 0
+    for line in raw.splitlines():
+        parts = line.split("|")
+        if len(parts) != 2:
+            continue
+        cpu_str, mem_str = parts
+        try:
+            cpu_total += float(cpu_str.strip().rstrip("%"))
+        except ValueError:
+            pass
+        mem_used = mem_str.split("/")[0].strip() if "/" in mem_str else ""
+        m = re.match(r"([\d.]+)\s*([A-Za-z]+)", mem_used)
+        if m:
+            value, unit = m.groups()
+            mem_total += float(value) * _SIZE_UNITS.get(unit, 0)
+        count += 1
+    if count == 0:
+        return None
+    return {"cpu_percent": round(cpu_total, 1), "mem_used_bytes": round(mem_total)}
+
+
+def parse_ping_extended(raw: str) -> dict:
+    loss = None
+    latency = None
+    m = re.search(r"([\d.]+)%\s*packet loss", raw)
+    if m:
+        loss = float(m.group(1))
+    m = re.search(r"= [\d.]+/([\d.]+)/", raw)  # rtt min/avg/max/mdev
+    if m:
+        latency = round(float(m.group(1)), 1)
+    return {"latency_ms": latency, "loss_pct": loss}
+
+
+def parse_tailscale_ip(raw: str) -> str | None:
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if re.match(r"^\d+\.\d+\.\d+\.\d+$", line):
+            return line
+    return None
+
+
+def parse_system_info(raw: str) -> dict:
+    lines = raw.strip("\n").splitlines()
+    os_pretty = lines[0].strip().strip('"') if len(lines) > 0 and lines[0].strip() else None
+    kernel = lines[1].strip() if len(lines) > 1 and lines[1].strip() else None
+    arch = lines[2].strip() if len(lines) > 2 and lines[2].strip() else None
+    boot_at = None
+    if len(lines) > 3 and lines[3].strip():
+        try:
+            boot_at = datetime.strptime(lines[3].strip(), "%Y-%m-%d %H:%M:%S").timestamp()
+        except ValueError:
+            boot_at = None
+    return {"os_pretty": os_pretty, "kernel": kernel, "arch": arch, "boot_at": boot_at}

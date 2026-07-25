@@ -179,7 +179,10 @@ main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
+.hdr-badge { font-size: 0.75rem; flex: 0 0 auto; line-height: 1; }
+.hdr-badge.hidden { display: none; }
 .status-text {
   font-size: 0.7rem;
   font-weight: 700;
@@ -258,9 +261,18 @@ main {
 }
 .mini-value { font-size: 0.82rem; font-weight: 700; }
 
+.server-card .mini-stats { gap: 4px; }
+.server-card .mini-stats .mini { padding: 6px 2px; }
+.server-card .mini-stats .mini-label {
+  font-size: 0.95rem;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1;
+}
+.server-card .mini-stats .mini-value { font-size: 0.76rem; }
+
 .card-footer {
   display: flex;
-  justify-content: space-between;
   gap: 8px;
   font-size: 0.72rem;
   color: var(--text-2);
@@ -268,7 +280,10 @@ main {
   border-top: 1px solid var(--panel-border);
   font-variant-numeric: tabular-nums;
 }
-.card-footer .latency { text-align: right; }
+.card-footer > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-footer .uptime { text-align: left; }
+.card-footer .latency { text-align: center; }
+.card-footer .wifi-ping { text-align: right; }
 
 /* ===================== Connectivity ===================== */
 .connectivity-card {
@@ -448,6 +463,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 .detail-grid .value { display: block; font-size: 0.95rem; font-weight: 700; }
 
 .detail-body h3 { font-size: 0.85rem; color: var(--text-2); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .08em; }
+.detail-section:first-child h3 { margin-top: 0; }
 
 .pd-bar-row {
   display: flex;
@@ -514,6 +530,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
   color: var(--ok);
 }
 .service-chip.down { background: rgba(248, 113, 113, 0.15); color: var(--bad); }
+.service-chip.warn { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
 
 .container-list, .procs-block ul {
   list-style: none;
@@ -711,8 +728,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 .sparkline {
   display: block;
   width: 100%;
-  height: 56px;
-  margin: 12px 0 20px;
+  height: 48px;
 }
 
 /* ===================== Alert bell ===================== */

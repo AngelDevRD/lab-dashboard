@@ -62,10 +62,14 @@ class Monitor:
         if was_online is not None and was_online != is_online:
             if is_online:
                 events.log_event(
-                    "server_up", f"{snapshot['name']} volvió a estar online"
+                    "server_up", f"{snapshot['name']} volvió a estar online",
+                    host=server["host"],
                 )
             else:
-                events.log_event("server_down", f"{snapshot['name']} dejó de responder")
+                events.log_event(
+                    "server_down", f"{snapshot['name']} dejó de responder",
+                    host=server["host"],
+                )
                 self._last_down_since[server["host"]] = time.time()
         self._prev_online[server["host"]] = is_online
 
@@ -79,11 +83,13 @@ class Monitor:
                 events.log_event(
                     f"alert_{alert.severity.value.lower()}",
                     f"[{alert.severity.value}] {alert.server}: {alert.title}",
+                    host=alert.server_host,
                 )
             else:
                 events.log_event(
                     "alert_resolved",
                     f"[{alert.severity.value}] {alert.server}: {alert.title} - Resuelto",
+                    host=alert.server_host,
                 )
 
     def _record_history(self, host: str, snapshot: dict) -> None:
@@ -206,6 +212,13 @@ class Monitor:
                 }
             )
         return devices
+
+    def get_server_status(self, host: str) -> dict | None:
+        return self.servers_status.get(host)
+
+    def get_autonomy_mode(self, host: str) -> str | None:
+        state = self._autonomy_state.get(host)
+        return state.mode.value if state else None
 
     def autonomy_metrics(self) -> dict:
         """Observabilidad — punto 3: snapshot de las metricas internas del

@@ -209,8 +209,8 @@ def services_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, 
     if not settings.enable_service_alerts:
         return
     services = server.get("services", {})
-    for name, active in services.items():
-        if not active:
+    for name, state in services.items():
+        if state != "active":
             yield {
                 "severity": Severity.CRITICAL,
                 "category": "services",
