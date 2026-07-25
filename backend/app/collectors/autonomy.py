@@ -73,11 +73,13 @@ class HostAutonomyState:
     # (timestamp, power_w) y (timestamp, energy_now_wh), recortados a
     # CHECK_INTERVAL_S — cubre tanto la ventana de 30s (Paso 1) como la de
     # 5 min (Paso 2) sin mantener dos buffers separados.
+    host: str = ""
     power_samples: deque = field(default_factory=deque)
     energy_samples: deque = field(default_factory=deque)
     last_check_ts: float | None = None
     stale_streak: int = 0
     mode: Mode = Mode.NORMAL
+    last_calibration_ts: float | None = None
 
 
 def _trim(buf: deque, now: float, window_s: float) -> None:
@@ -163,6 +165,7 @@ def evaluate(state: HostAutonomyState, now: float) -> dict | None:
     else:
         state.stale_streak = 0
 
+    prev_mode = state.mode
     # Paso 5: en cuanto un ciclo deja de mostrar divergencia sostenida, se
     # sale de CALIBRATED/INCONSISTENT solo — no hay bandera "una vez roto,
     # siempre calibrado". Ningun ajuste manual por servidor.
@@ -172,23 +175,44 @@ def evaluate(state: HostAutonomyState, now: float) -> dict | None:
         state.mode = Mode.INCONSISTENT
     else:
         state.mode = Mode.NORMAL
+    if state.mode == Mode.CALIBRATED and prev_mode != Mode.CALIBRATED:
+        state.last_calibration_ts = now
 
-    result = {
-        "mode": state.mode, "power_avg": power_avg, "power_cv": power_cv,
-        "derived_power": derived, "error_pct": error * 100 if error is not None else None,
-        "diverges": diverges, "stale_streak": state.stale_streak,
-    }
+    error_pct = error * 100 if error is not None else None
+    log_factor = CALIBRATION_WEIGHT if state.mode == Mode.CALIBRATED else 0.0
+    decision = {
+        Mode.NORMAL: "power_now confiable, sin cambios",
+        Mode.INCONSISTENT: f"ciclo {state.stale_streak}/{CONFIRM_CYCLES} con error>{DIVERGENCE_THRESHOLD*100:.0f}%, aun sin confirmar",
+        Mode.CALIBRATED: f"divergencia confirmada tras {CONFIRM_CYCLES} ciclos, aplicando {CALIBRATION_WEIGHT*100:.0f}% de peso derivado",
+    }[state.mode]
+
+    # Observabilidad — punto 1: log estructurado en cada evaluacion (una vez
+    # cada CHECK_INTERVAL_S, no modifica la logica de decision de arriba).
     logger.info(
-        "autonomy calibration check: mode=%s power_now_avg=%s derived=%s "
-        "error=%s cv(estabilidad)=%s stale_streak=%d",
+        "[AUTONOMY] host=%s mode=%s error=%s cv=%s power_now_avg30=%s "
+        "power_delta_energy=%s calibration_factor=%.2f decision=%s",
+        state.host,
         state.mode.value,
-        f"{power_avg:.2f}W" if power_avg else "NA",
-        f"{derived:.2f}W" if derived else "NA",
-        f"{error*100:.1f}%" if error is not None else "NA",
-        f"{power_cv:.3f}" if power_cv is not None else "NA",
-        state.stale_streak,
+        f"{error_pct:.1f}%" if error_pct is not None else "NA",
+        f"{power_cv*100:.1f}%" if power_cv is not None else "NA",
+        f"{power_avg:.2f}W" if power_avg is not None else "NA",
+        f"{derived:.2f}W" if derived is not None else "NA",
+        log_factor,
+        decision,
     )
-    return result
+    # Observabilidad — punto 2: log separado SOLO en transiciones, con motivo.
+    if state.mode != prev_mode:
+        logger.info(
+            "[AUTONOMY][TRANSITION] host=%s %s -> %s motivo=\"%s\"",
+            state.host, prev_mode.value, state.mode.value, decision,
+        )
+
+    return {
+        "mode": state.mode, "power_avg": power_avg, "power_cv": power_cv,
+        "derived_power": derived, "error_pct": error_pct,
+        "diverges": diverges, "stale_streak": state.stale_streak,
+        "prev_mode": prev_mode, "decision": decision,
+    }
 
 
 def blended_power(state: HostAutonomyState, now: float) -> tuple[float | None, float]:
@@ -204,6 +228,32 @@ def blended_power(state: HostAutonomyState, now: float) -> tuple[float | None, f
         return avg30, 0.0
     blended = (1 - CALIBRATION_WEIGHT) * avg30 + CALIBRATION_WEIGHT * derived
     return blended, CALIBRATION_WEIGHT
+
+
+def metrics(state: HostAutonomyState) -> dict:
+    """Observabilidad — punto 3: snapshot de las metricas internas para el
+    endpoint de diagnostico. No calcula nada nuevo, solo expone el estado
+    actual del algoritmo (mismas funciones que ya usa estimate())."""
+    now = time.time()
+    avg30 = rolling_power_avg30(state, now)
+    derived = _derived_power(state)
+    cv = _cv([p for _, p in state.power_samples])
+    error = None
+    if avg30 is not None and derived and derived > 0:
+        error = abs(avg30 - derived) / derived
+    factor = CALIBRATION_WEIGHT if state.mode == Mode.CALIBRATED else 0.0
+    return {
+        "host": state.host,
+        "autonomy_mode": state.mode.value,
+        "firmware_reliable": state.mode == Mode.NORMAL,
+        "power_now_avg30": round(avg30, 3) if avg30 is not None else None,
+        "power_delta_energy": round(derived, 3) if derived is not None else None,
+        "error_pct": round(error * 100, 1) if error is not None else None,
+        "cv_pct": round(cv * 100, 1) if cv is not None else None,
+        "calibration_factor": factor,
+        "samples": len(state.power_samples),
+        "last_calibration": state.last_calibration_ts,
+    }
 
 
 def autonomy_seconds(status: str | None, energy_now_wh: float | None, energy_full_wh: float | None, power_w: float | None) -> float | None:

@@ -98,7 +98,7 @@ class Monitor:
 
         pwr = snapshot.get("power") or {}
         if pwr.get("available"):
-            state = self._autonomy_state.setdefault(host, autonomy.HostAutonomyState())
+            state = self._autonomy_state.setdefault(host, autonomy.HostAutonomyState(host=host))
             autonomy.record_sample(state, time.time(), pwr.get("power_now_w"), pwr.get("energy_now_wh"))
 
     def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
@@ -206,6 +206,11 @@ class Monitor:
                 }
             )
         return devices
+
+    def autonomy_metrics(self) -> dict:
+        """Observabilidad — punto 3: snapshot de las metricas internas del
+        algoritmo de autonomia por host, para el endpoint de diagnostico."""
+        return {host: autonomy.metrics(state) for host, state in self._autonomy_state.items()}
 
     def snapshot(self) -> dict:
         ordered_hosts = self._server_order or list(self.servers_status.keys())

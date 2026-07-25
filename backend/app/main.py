@@ -288,6 +288,15 @@ async def get_framework_telemetry():
     return framework_telemetry.summary()
 
 
+@app.get("/api/autonomy/metrics")
+async def get_autonomy_metrics():
+    """Diagnostico interno del algoritmo hibrido de autonomia (ver
+    backend/app/collectors/autonomy.py) — no forma parte del dashboard
+    principal, es para verificar en vivo que el disparador de calibracion
+    esta funcionando como fue diseñado."""
+    return monitor.autonomy_metrics()
+
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
