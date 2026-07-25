@@ -197,16 +197,73 @@ def parse_battery(raw: str) -> dict:
     parts = line.split("|")
     if len(parts) < 3:
         return {"available": False}
-    capacity, status, voltage = parts
+    (
+        capacity, status, voltage,
+        energy_now, energy_full, power_now,
+        time_to_empty, time_to_full,
+        charge_now, charge_full, current_now,
+    ) = (
+        parts[0], parts[1], parts[2],
+        parts[3] if len(parts) > 3 else "",
+        parts[4] if len(parts) > 4 else "",
+        parts[5] if len(parts) > 5 else "",
+        parts[6] if len(parts) > 6 else "",
+        parts[7] if len(parts) > 7 else "",
+        parts[8] if len(parts) > 8 else "",
+        parts[9] if len(parts) > 9 else "",
+        parts[10] if len(parts) > 10 else "",
+    )
     try:
         voltage_v = round(int(voltage) / 1_000_000, 2) if voltage.isdigit() else None
     except ValueError:
         voltage_v = None
+
+    voltage_uv = int(voltage) if voltage.isdigit() else None
+
+    def safe_float(v: str) -> float | None:
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    e_now = safe_float(energy_now)
+    e_full = safe_float(energy_full)
+    p_now = safe_float(power_now)
+    tte = safe_float(time_to_empty)
+    ttf = safe_float(time_to_full)
+
+    c_now = safe_float(charge_now)
+    c_full = safe_float(charge_full)
+    i_now = safe_float(current_now)
+
+    if not e_now and voltage_uv and c_now:
+        e_now = c_now * voltage_uv / 1_000_000
+    if not e_full and voltage_uv and c_full:
+        e_full = c_full * voltage_uv / 1_000_000
+    if not p_now and voltage_uv and i_now:
+        p_now = i_now * voltage_uv / 1_000_000
+
+    autonomy = None
+    if status == "Discharging":
+        if tte and tte > 0:
+            autonomy = tte
+        elif e_now and e_now > 0 and p_now and p_now > 0:
+            autonomy = (e_now / p_now) * 3600
+    elif status == "Charging":
+        if ttf and ttf > 0:
+            autonomy = ttf
+        elif e_full and e_now is not None and e_full > 0 and p_now and p_now > 0:
+            autonomy = ((e_full - e_now) / p_now) * 3600
+
     return {
         "available": True,
         "percent": int(capacity) if capacity.isdigit() else None,
         "status": status or "unknown",
         "voltage": voltage_v,
+        "energy_now_wh": round(e_now / 1_000_000, 2) if e_now else None,
+        "energy_full_wh": round(e_full / 1_000_000, 2) if e_full else None,
+        "power_now_w": round(p_now / 1_000_000, 2) if p_now else None,
+        "autonomy_seconds": round(autonomy) if autonomy else None,
     }
 
 

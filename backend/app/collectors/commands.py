@@ -25,7 +25,7 @@ COMMANDS = {
     ),
     "battery": (
         "for f in /sys/class/power_supply/BAT*; do "
-        '[ -d "$f" ] && echo "$(cat $f/capacity 2>/dev/null)|$(cat $f/status 2>/dev/null)|$(cat $f/voltage_now 2>/dev/null)"; '
+        '[ -d "$f" ] && echo "$(cat $f/capacity 2>/dev/null)|$(cat $f/status 2>/dev/null)|$(cat $f/voltage_now 2>/dev/null)|$(cat $f/energy_now 2>/dev/null)|$(cat $f/energy_full 2>/dev/null)|$(cat $f/power_now 2>/dev/null)|$(cat $f/time_to_empty_now 2>/dev/null)|$(cat $f/time_to_full_now 2>/dev/null)|$(cat $f/charge_now 2>/dev/null)|$(cat $f/charge_full 2>/dev/null)|$(cat $f/current_now 2>/dev/null)"; '
         "done"
     ),
     "disk_temp": "smartctl -A /dev/sda 2>/dev/null | grep -i temperature | head -1",

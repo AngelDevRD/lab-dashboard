@@ -26,12 +26,9 @@ class AlertCenter:
                 data = json.load(f)
             for item in data:
                 try:
-                    alert = Alert(**item)
-                    self._alerts[alert.id] = alert
-                    self._order.append(alert.id)
+                    self._touch(Alert(**item))
                 except Exception:
                     continue
-            self._order = self._order[-self._max:]
         except Exception as e:
             logger.error("Failed to load alert history: %s", e)
 
@@ -43,12 +40,24 @@ class AlertCenter:
         except Exception as e:
             logger.error("Failed to save alert history: %s", e)
 
-    def add(self, alert: Alert) -> None:
+    def _touch(self, alert: Alert) -> None:
+        # Same alert_id re-activating (hysteresis re-triggers it after a
+        # resolve+cooldown cycle) must move to the most-recent position, not
+        # append a second entry — otherwise a long-lived recurring alert
+        # accumulates dozens of duplicate slots in _order, all resolving to
+        # the same object via the dict, which inflates active/critical counts
+        # and burns through max_history on repeats of the same alert instead
+        # of real distinct ones.
         self._alerts[alert.id] = alert
+        if alert.id in self._order:
+            self._order.remove(alert.id)
         self._order.append(alert.id)
         if len(self._order) > self._max:
             old = self._order.pop(0)
             self._alerts.pop(old, None)
+
+    def add(self, alert: Alert) -> None:
+        self._touch(alert)
         self._save()
 
     def update(self, alert: Alert) -> None:

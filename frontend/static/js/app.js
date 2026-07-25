@@ -8,6 +8,7 @@
   const connectivityTemplate = document.getElementById("connectivity-card-template");
   const connectivityCards = new Map();
   const prevOnline = new Map();
+  const autoState = new Map();
   let selectedHost = null;
   let latestServers = new Map();
   let firstRender = true;
@@ -46,6 +47,7 @@
 
   function drawSparkline(canvas, cpuSeries, memSeries) {
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
@@ -68,6 +70,72 @@
     };
     plot(memSeries, style.getPropertyValue("--text-2").trim(), 0);
     plot(cpuSeries, style.getPropertyValue("--accent").trim(), bandH + gap);
+  }
+
+  function round5(sec) {
+    return Math.round(sec / 300) * 300;
+  }
+
+  function fmtAuto(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return h > 0 && m > 0 ? `${h} h ${m} min` : h > 0 ? `${h} h` : `${m} min`;
+  }
+
+  function applyAuto(el, txt) {
+    if (el.textContent === txt) return;
+    el.textContent = txt;
+    el.classList.remove("auto-flash");
+    void el.offsetWidth;
+    el.classList.add("auto-flash");
+  }
+
+  function renderAutonomy(refs, power, host) {
+    const el = refs.el.autonomy;
+    const sec = power.autonomy_seconds;
+    const status = power.status;
+
+    let special = null;
+    if (!power.available) special = "--";
+    else if (status === "Full" || status === "Not charging") special = "En AC";
+    else if (sec == null || sec <= 0) special = "N/A";
+
+    const st = autoState.get(host);
+
+    if (special !== null) {
+      if (!st || st.lastText !== special) {
+        applyAuto(el, special);
+        autoState.set(host, { lastText: special, lastSec: null, lastUpdate: Date.now(), special: true });
+      }
+      return;
+    }
+
+    const rounded = round5(sec);
+    const txt = fmtAuto(rounded);
+
+    if (st && st.special) {
+      applyAuto(el, txt);
+      autoState.set(host, { lastText: txt, lastSec: rounded, lastUpdate: Date.now(), special: false });
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = st ? now - st.lastUpdate : Infinity;
+
+    if (elapsed < 30000) return;
+
+    if (elapsed >= 60000 || !st || st.lastSec == null) {
+      applyAuto(el, txt);
+      autoState.set(host, { lastText: txt, lastSec: rounded, lastUpdate: now, special: false });
+      return;
+    }
+
+    const diff = Math.abs(rounded - st.lastSec);
+    const pct = st.lastSec > 0 ? diff / st.lastSec : 1;
+    if (diff > 300 || pct > 0.05) {
+      applyAuto(el, txt);
+      autoState.set(host, { lastText: txt, lastSec: rounded, lastUpdate: now, special: false });
+    }
   }
 
   function statusLevel(s) {
@@ -103,6 +171,7 @@
         latency: el.querySelector(".latency"),
         wifiNetwork: el.querySelector(".wifi-network"),
         wifiPing: el.querySelector(".wifi-ping"),
+        autonomy: el.querySelector(".autonomy-value"),
         sparkline: el.querySelector(".sparkline"),
       },
       last: {},
@@ -138,7 +207,9 @@
     setText(refs, "name", s.name);
 
     if (!s.online) {
-      refs.el.dot.className = "status-dot offline";
+      const offDot = "status-dot offline";
+      refs.el.dot.className = offDot;
+      refs.last.dot = offDot;
       setStatusText(refs.el.statusText, false);
       setText(refs, "cpu", "--%");
       setText(refs, "mem", "--%");
@@ -153,7 +224,10 @@
       setText(refs, "latency", "");
       setText(refs, "wifiNetwork", "--");
       setText(refs, "wifiPing", "");
-      refs.el.sparkline.getContext("2d").clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
+      setText(refs, "autonomy", "--");
+      autoState.delete(s.host);
+      const offCtx = refs.el.sparkline.getContext("2d");
+      if (offCtx) offCtx.clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
       flagAlert(s, false);
       if (s.host === selectedHost) renderDetail(s);
       return;
@@ -179,7 +253,7 @@
     setBar(refs, "diskBar", diskPct);
 
     const hist = s.history || { cpu: [], mem: [] };
-    drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
+    if (hist.cpu.length >= 2 || hist.mem.length >= 2) drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
 
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
@@ -202,6 +276,8 @@
 
     setText(refs, "uptime", s.uptime?.pretty || "--");
     setText(refs, "latency", s.latency_ms != null ? `${s.latency_ms} ms` : "");
+
+    renderAutonomy(refs, power, s.host);
 
     const net = s.network || {};
     setText(refs, "wifiNetwork", net.available ? (net.current_network || "Sin red") : "--");
@@ -256,17 +332,10 @@
     setText(refs, "lastFailover", dev.last_failover ? `${dev.last_failover.reason || "failover"} (${new Date(dev.last_failover.time * 1000).toLocaleTimeString()})` : "--");
   }
 
-  let lastConnectivityKey = "";
   function renderConnectivity(devices) {
-    // Los dispositivos con source "ssh" ya son servidores con su propia card (ver
-    // wifi-network/wifi-ping en renderServer) — esta sección de arriba solo muestra
-    // dispositivos que reportan por push y no tienen card propia (PC, tablet).
     const list = (devices || []).filter((d) => d.source !== "ssh");
     const card = document.getElementById("connectivity-card");
     card.classList.toggle("hidden", list.length === 0);
-    const key = list.map((d) => `${d.device_id}:${d.status}:${d.current_network || d.network}:${d.rssi}:${d.ping_ms}`).join("|");
-    if (key === lastConnectivityKey) return;
-    lastConnectivityKey = key;
     for (const dev of list) renderConnectivityDevice(dev);
   }
 
@@ -373,6 +442,7 @@
   function flagAlert(s, warn) {
     const was = prevOnline.get(s.host);
     prevOnline.set(s.host, s.online);
+    if (was === undefined) return;
     if (was === false && s.online) return;
     if (!s.online || warn) playAlert();
   }
@@ -397,19 +467,12 @@
     } catch (_) { /* Web Audio no disponible */ }
   }
 
-  let lastSummary = "";
   function renderSummary(data) {
-    const text = `${data.summary.online}|${data.summary.offline}`;
-    if (text === lastSummary) return;
-    lastSummary = text;
     document.getElementById("pill-online").textContent = `${data.summary.online} online`;
     document.getElementById("pill-offline").textContent = `${data.summary.offline} offline`;
   }
 
-  let lastInternet = null;
   function renderInternet(net) {
-    if (lastInternet === net.online) return;
-    lastInternet = net.online;
     const dot = document.getElementById("internet-dot");
     dot.className = `status-dot ${net.online ? "online" : "offline"}`;
     dot.title = net.online
@@ -425,11 +488,7 @@
     }
   }
 
-  let lastEventsKey = "";
   function renderEvents(events) {
-    const key = events.length ? events[0].time + events[0].kind : "";
-    if (key === lastEventsKey) return;
-    lastEventsKey = key;
     const ul = document.getElementById("event-log");
     ul.textContent = "";
     for (const ev of events) {
@@ -448,11 +507,7 @@
     }
   }
 
-  let lastAlertsKey = "";
   function renderAlerts(alerts) {
-    const key = alerts.map((a) => a.id + a.status).join(",");
-    if (key === lastAlertsKey) return;
-    lastAlertsKey = key;
 
     const active = alerts.filter((a) => a.status === "active");
     const badge = document.getElementById("alert-badge");
@@ -504,7 +559,7 @@
       "servers-4", "servers-5", "servers-6"
     );
     if (count >= 1 && count <= 6) grid.classList.add(`servers-${count}`);
-    for (const s of data.servers) renderServer(s);
+    for (const s of data.servers) { try { renderServer(s); } catch (e) { console.error("renderServer failed for", s.host, e); } }
   }
 
   // --- WebSocket with polling fallback ---
@@ -536,7 +591,10 @@
     log(down ? "Server unreachable — showing down overlay" : "Server reachable again — hiding down overlay");
   }
 
+  let wsConnecting = false;
   function connectWS() {
+    if (wsConnecting) return;
+    wsConnecting = true;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}/ws`);
     if (!lastMessageAt) lastMessageAt = Date.now(); // starts the down-overlay clock even if this first attempt never connects
@@ -551,11 +609,12 @@
       }
     };
     ws.onclose = () => {
+      wsConnecting = false;
       log("WS closed, scheduling reconnect in 3s");
       if (!usingFallback) startFallback();
       setTimeout(connectWS, 3000);
     };
-    ws.onerror = () => ws.close();
+    ws.onerror = () => { wsConnecting = false; ws.close(); };
     ws.onopen = () => {
       log("WS connected");
       lastMessageAt = Date.now();
@@ -576,6 +635,7 @@
 
   let fallbackInFlight = false;
   function startFallback() {
+    if (usingFallback) return;
     usingFallback = true;
     fallbackTimer = setInterval(async () => {
       if (fallbackInFlight) return; // avoid piling up overlapping requests
@@ -602,8 +662,9 @@
   }
 
   function stopFallback() {
+    if (fallbackTimer) clearInterval(fallbackTimer);
+    fallbackTimer = null;
     usingFallback = false;
-    clearInterval(fallbackTimer);
   }
 
   connectWS();
@@ -989,7 +1050,7 @@
     const techs = dep?.technologies || [];
     if (techs.length === 0) return `<p class="pd-empty">Sin tecnologías detectadas.</p>`;
     const byCategory = {};
-    for (const t of techs) { (byCategory[t.category] ||= []).push(t); }
+    for (const t of techs) { if (!byCategory[t.category]) byCategory[t.category] = []; byCategory[t.category].push(t); }
     return Object.entries(byCategory).map(([cat, items]) => `
       <div class="pd-tech-group">
         <span class="pd-tech-cat">${cat}</span>

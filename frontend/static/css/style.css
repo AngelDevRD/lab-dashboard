@@ -149,7 +149,7 @@ main {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   border-top: 3px solid var(--panel-border);
-  padding: 16px;
+  padding: 14px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -236,26 +236,27 @@ main {
 .bar-fill.bad { background: var(--bad); }
 
 .mini-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 5px;
 }
 .mini {
+  flex: 1;
+  min-width: 0;
   background: var(--panel-2);
   border-radius: 10px;
-  padding: 8px 6px;
+  padding: 6px 4px;
   text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 .mini-label {
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: .08em;
 }
-.mini-value { font-size: 0.92rem; font-weight: 700; }
+.mini-value { font-size: 0.82rem; font-weight: 700; }
 
 .card-footer {
   display: flex;
@@ -397,7 +398,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 /* ===================== Detail overlay ===================== */
 .detail-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -549,7 +550,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 /* ===================== Server down overlay ===================== */
 #server-down-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0, 0, 0, 0.72);
   display: flex;
   align-items: center;
@@ -573,7 +574,7 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 #rotate-overlay {
   display: none;
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   z-index: 100;
   background: var(--bg-1);
   color: var(--text-1);
@@ -614,27 +615,28 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
+  overflow: hidden;
 }
 
 .bat-icon {
   display: inline-block;
-  width: 20px;
-  height: 11px;
-  padding: 1.5px;
+  width: 16px;
+  height: 9px;
+  padding: 1px;
   border: 1.5px solid var(--text-2);
-  border-radius: 3px;
+  border-radius: 2px;
   position: relative;
   flex: 0 0 auto;
-  margin-right: 8px;
+  margin-right: 4px;
 }
 .bat-icon::after {
   content: "";
   position: absolute;
-  right: -4.5px;
-  top: 2.5px;
-  width: 3px;
-  height: 4px;
+  right: -3.5px;
+  top: 2px;
+  width: 2.5px;
+  height: 3px;
   background: var(--text-2);
   border-radius: 0 1.5px 1.5px 0;
 }
@@ -671,6 +673,14 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
   font-weight: 700;
   font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
+}
+
+.autonomy-value.auto-flash {
+  animation: auto-fade 0.2s ease-out;
+}
+@keyframes auto-fade {
+  0% { opacity: 0.5; }
+  100% { opacity: 1; }
 }
 .bat-pct.bat-warning { color: var(--warn); }
 .bat-pct.bat-critical { color: var(--bad); }
@@ -758,4 +768,8 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+  .server-card.skeleton { animation: none; background: var(--panel-2); }
+  .alert-banner { animation: none; }
+  .server-down-box { animation: none; }
+  .bat-icon.bat-charging::before { animation: none; }
 }
