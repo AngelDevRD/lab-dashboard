@@ -17,6 +17,8 @@ import shutil
 import time
 from datetime import date, datetime
 
+from pydantic import BaseModel
+
 from .. import config
 
 logger = logging.getLogger("dashboard")
@@ -30,6 +32,72 @@ _cache: dict[str, tuple[float, dict]] = {}
 # period -> in-flight fetch, so concurrent requests share one ccusage call
 # instead of racing separate subprocesses (which flakes under load on Windows).
 _inflight: dict[str, asyncio.Task] = {}
+
+
+class ClaudeUsagePush(BaseModel):
+    """Payload a remote machine POSTs to /api/claude-usage/report.
+
+    `reports` mirrors ccusage's own --json output per period (same shape
+    _run_ccusage returns), so the existing _filter_report/_recompute_totals
+    logic below works unchanged on pushed data.
+    """
+
+    source: str
+    generated_at: str
+    reports: dict[str, dict]
+
+
+# In-memory copy of the last received push, so repeated GETs don't hit disk.
+# None means "nothing pushed yet, or not loaded from disk this process".
+_pushed: dict | None = None
+_pushed_loaded_from_disk = False
+
+
+def _load_pushed_from_disk() -> dict | None:
+    path = config.CLAUDE_USAGE_REPORT_FILE
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        logger.exception("Failed to read pushed claude-usage report from %s", path)
+        return None
+
+
+def save_push(push: ClaudeUsagePush) -> None:
+    global _pushed, _pushed_loaded_from_disk
+    path = config.CLAUDE_USAGE_REPORT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {**push.model_dump(), "received_at": time.time()}
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    tmp.replace(path)
+    _pushed = data
+    _pushed_loaded_from_disk = True
+
+
+def _get_pushed() -> dict | None:
+    global _pushed, _pushed_loaded_from_disk
+    if not _pushed_loaded_from_disk:
+        _pushed = _load_pushed_from_disk()
+        _pushed_loaded_from_disk = True
+    return _pushed
+
+
+def push_status() -> dict | None:
+    """Metadata about the last received push, for the frontend's staleness badge."""
+    data = _get_pushed()
+    if data is None:
+        return None
+    age = time.time() - data["received_at"]
+    return {
+        "source": data.get("source"),
+        "generated_at": data.get("generated_at"),
+        "received_at": data.get("received_at"),
+        "stale": age > config.CLAUDE_USAGE_STALE_SEC,
+    }
 
 
 async def _run_ccusage(period: str) -> dict:
@@ -117,14 +185,21 @@ def _filter_report(data: dict, since_date: date) -> dict:
 
 
 async def get_report(period: str, since: str | None = None) -> dict:
-    """ccusage's report for `period` (daily/monthly/session), optionally
-    restricted to entries on/after `since` (YYYYMMDD). Always fetches the
-    full history from ccusage (cached) and filters in-process, so switching
-    between day ranges never re-triggers a ccusage subprocess."""
+    """Report for `period` (daily/monthly/session), optionally restricted to
+    entries on/after `since` (YYYYMMDD). Prefers the last report pushed by a
+    remote machine (see ClaudeUsagePush) over running ccusage locally — ccusage
+    only sees Claude Code sessions that ran on *this* host, which is wrong for
+    a server that just monitors other machines. Falls back to a local ccusage
+    subprocess when nothing has ever been pushed, so running the backend
+    directly on a dev machine still works with no extra setup."""
     if period not in _PERIODS:
         raise ValueError(f"unsupported period: {period!r}, expected one of {_PERIODS}")
 
-    data = await _get_full_report(period)
+    pushed = _get_pushed()
+    if pushed is not None:
+        data = pushed.get("reports", {}).get(period, {})
+    else:
+        data = await _get_full_report(period)
     if not since:
         return data
     since_date = datetime.strptime(since, "%Y%m%d").date()

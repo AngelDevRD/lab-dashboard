@@ -44,6 +44,17 @@ CLAUDE_USAGE_PACKAGE = os.getenv("CLAUDE_USAGE_PACKAGE", "ccusage@20.0.18")
 CLAUDE_USAGE_CACHE_TTL = float(os.getenv("CLAUDE_USAGE_CACHE_TTL", "300"))
 CLAUDE_USAGE_TIMEOUT = float(os.getenv("CLAUDE_USAGE_TIMEOUT", "30"))
 
+# Pushed by a remote machine that actually runs Claude Code (ccusage reads local
+# session logs, so it's useless on a host where Claude Code never ran). The
+# backend serves this instead of shelling out to ccusage whenever a push has
+# been received; falls back to running ccusage itself only if none ever arrived
+# (keeps local/dev usage working unchanged).
+CLAUDE_USAGE_REPORT_TOKEN = os.getenv("CLAUDE_USAGE_REPORT_TOKEN", "")
+CLAUDE_USAGE_REPORT_FILE = Path(
+    os.getenv("CLAUDE_USAGE_REPORT_FILE", str(BASE_DIR / "data" / "claude_usage_push.json"))
+)
+CLAUDE_USAGE_STALE_SEC = float(os.getenv("CLAUDE_USAGE_STALE_SEC", str(24 * 3600)))
+
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(

@@ -19,6 +19,7 @@ from .alerts.center import alert_center
 from .alerts.service import notification_service
 from .alerts.thresholds import threshold_manager
 from .collectors import claude_usage, framework_telemetry
+from .collectors.claude_usage import ClaudeUsagePush
 from .collectors.framework_telemetry import FrameworkTelemetryReport
 from .models import HealthResponse, StatusResponse
 from .monitor import monitor
@@ -223,6 +224,28 @@ async def get_claude_usage(period: str = "daily", days: str = "30"):
     except Exception as exc:
         logger.warning("claude_usage fetch failed: %s", exc)
         return JSONResponse(status_code=502, content={"detail": "ccusage unavailable"})
+
+
+@app.get("/api/claude-usage/status")
+async def get_claude_usage_status():
+    status = claude_usage.push_status()
+    if status is None:
+        return JSONResponse(status_code=404, content={"detail": "no push received yet"})
+    return status
+
+
+@app.post("/api/claude-usage/report")
+@limiter.limit("30/second")
+async def report_claude_usage(
+    request: Request, payload: ClaudeUsagePush, x_claude_usage_token: str = Header(default="")
+):
+    if (
+        not config.CLAUDE_USAGE_REPORT_TOKEN
+        or x_claude_usage_token != config.CLAUDE_USAGE_REPORT_TOKEN
+    ):
+        return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+    claude_usage.save_push(payload)
+    return Response(status_code=204)
 
 
 @app.post("/api/network/report")

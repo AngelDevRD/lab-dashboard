@@ -859,8 +859,27 @@
     renderClaudeUsage();
   });
 
+  async function renderClaudeUsagePushStatus() {
+    const el = document.getElementById("cu-push-status");
+    if (!el) return;
+    try {
+      const res = await fetch("/api/claude-usage/status");
+      if (!res.ok) {
+        el.textContent = "";
+        return;
+      }
+      const s = await res.json();
+      const when = s.generated_at ? new Date(s.generated_at).toLocaleString() : "--";
+      el.textContent = `${s.source || "remoto"} · actualizado ${when}`;
+      el.classList.toggle("cu-push-stale", !!s.stale);
+    } catch (_) {
+      el.textContent = "";
+    }
+  }
+
   let renderRequestId = 0;
   async function renderClaudeUsage() {
+    renderClaudeUsagePushStatus();
     const requestId = ++renderRequestId;
     // ccusage rescans local log files on a cache miss (first load, or every 5
     // min after the backend's TTL expires), which can take several seconds

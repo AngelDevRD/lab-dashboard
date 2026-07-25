@@ -16,4 +16,6 @@ backups/
 config/
 data/
 .last-built-commit
+system/claude-usage-reporter/config.json
+system/claude-usage-reporter/report.log
 

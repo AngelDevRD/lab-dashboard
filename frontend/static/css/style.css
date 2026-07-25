@@ -373,6 +373,14 @@ main {
   gap: 10px 16px;
   margin-bottom: 4px;
 }
+
+.cu-push-status {
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+.cu-push-status.cu-push-stale {
+  color: var(--warn);
+}
 .view-header h1 { font-size: 1.2rem; margin: 0; font-weight: 700; }
 .nav-btn {
   background: var(--panel-2);
