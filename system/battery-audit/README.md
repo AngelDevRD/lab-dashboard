@@ -146,6 +146,21 @@ acumular 3 ciclos consecutivos. angel1 (host sano) se mantuvo 100% en modo
 - `sample_data/raw_angel1.txt`, `raw_angel2.txt` — capturas crudas de la
   auditoria (10 min, 200 muestras c/u), usadas por `simulate_hybrid.py`
 
+## Captura continua (`collect_samples.py`)
+
+A diferencia de las auditorias puntuales de arriba (10/40 min, manuales),
+`collect_samples.py` es un servicio systemd que corre indefinidamente en el
+servidor y va acumulando el mismo formato de 26 campos en
+`/var/log/battery-audit/live_samples.txt` (una fila cada `BATTERY_AUDIT_INTERVAL_S`,
+10s por defecto). Instalar con `sudo ./install.sh` en cada host a auditar
+(pensado para `angel1`/`angel2`, los mismos de la auditoria original). No hace
+falta pararlo para analizar — el archivo se puede copiar en caliente en
+cualquier momento y seguir corriendo indefinidamente hasta que se decida que ya
+hay suficiente historia acumulada para recalibrar `CALIBRATION_WEIGHT` /
+`DIVERGENCE_THRESHOLD` en `autonomy.py` con mas confianza que los 40 min
+originales. Reusa `live_audit_analyze.py`/`simulate_hybrid.py` sin cambios —
+mismo esquema de campos.
+
 ## Logs en produccion
 
 `evaluate()` loguea cada ciclo de 5 min a nivel INFO: modo, promedio de

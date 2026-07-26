@@ -1,0 +1,17 @@
+[Unit]
+Description=Battery audit sampler (recopila datos de bateria/energia para calibrar el algoritmo de autonomia)
+After=multi-user.target
+
+[Service]
+Type=simple
+Environment=BATTERY_AUDIT_OUTPUT=/var/log/battery-audit/live_samples.txt
+Environment=BATTERY_AUDIT_INTERVAL_S=10
+ExecStart=/usr/bin/python3 /opt/battery-audit/collect_samples.py
+Restart=always
+RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=/var/log/battery-audit
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
