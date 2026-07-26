@@ -291,7 +291,7 @@
     setBadge(refs, "hdrDocker", docker.available && docker.running > 0);
 
     setText(refs, "uptime", s.uptime?.pretty || "--");
-    setText(refs, "latency", s.latency_ms != null ? `${s.latency_ms} ms` : "");
+    setText(refs, "latency", s.latency_ms != null ? `SSH ${s.latency_ms} ms` : "");
 
     renderAutonomy(refs, power, s.host);
 
