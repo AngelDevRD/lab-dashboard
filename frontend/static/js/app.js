@@ -278,7 +278,7 @@
       const iconClasses = ["bat-icon", charging ? "bat-charging" : "", level].filter(Boolean).join(" ");
       const icon = `<span class="${iconClasses}" style="--bat-lvl:${pct}%"></span>`;
       setHTML(refs, "power",
-        `${icon}<span class="bat-pct ${level}">${pct}%</span>`
+        `${icon}<span class="bat-pct ${level}">${pct}</span>`
       );
     } else {
       setText(refs, "power", "--");

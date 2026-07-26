@@ -181,8 +181,12 @@ main {
   text-overflow: ellipsis;
   min-width: 0;
 }
-.hdr-badge { font-size: 0.75rem; flex: 0 0 auto; line-height: 1; }
+.hdr-badge { flex: 0 0 auto; line-height: 1; color: var(--text-2); display: inline-flex; }
 .hdr-badge.hidden { display: none; }
+.hdr-badge .icon-svg { width: 13px; height: 13px; }
+
+.icon-svg { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+.icon-svg-inline { width: 13px; height: 13px; margin-right: 2px; vertical-align: -2px; }
 .status-text {
   font-size: 0.7rem;
   font-weight: 700;
@@ -264,10 +268,11 @@ main {
 .server-card .mini-stats { gap: 4px; }
 .server-card .mini-stats .mini { padding: 6px 2px; }
 .server-card .mini-stats .mini-label {
-  font-size: 0.95rem;
+  display: block;
   text-transform: none;
   letter-spacing: 0;
   line-height: 1;
+  color: var(--text-2);
 }
 .server-card .mini-stats .mini-value { font-size: 0.76rem; }
 
