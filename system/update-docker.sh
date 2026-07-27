@@ -60,10 +60,20 @@ log "Commit actual: $CURRENT"
 log "Actualizando desde origin..."
 git fetch origin 2>&1 | tee -a "$LOG_FILE"
 
+# Si el repo esta en una rama que no es main, es una rama de trabajo activa
+# (ej. una feature branch a medio revisar) -- nunca cambiarla automaticamente.
+# Un incidente real: este updater switcheo a main mientras habia trabajo sin
+# terminar en otra rama, pisando el checkout (los commits no se perdieron,
+# pero el working tree quedo en la rama equivocada a mitad de una sesion).
+# A diferencia del chequeo de cambios sin commitear (paso 1), esto NO se
+# puede saltear con FORCE=true: forzar el update no es lo mismo que forzar
+# un cambio de rama que no pediste.
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$CURRENT_BRANCH" != "main" ]; then
-  log "Cambiando a rama main..."
-  git checkout main 2>&1 | tee -a "$LOG_FILE"
+  log "ERROR: el repositorio esta en la rama '$CURRENT_BRANCH', no en main. Abortando."
+  log "       No se cambia de rama automaticamente -- puede haber trabajo en curso."
+  log "       Si esa rama ya no hace falta, cambiar a mano a main y reintentar."
+  exit 1
 fi
 
 # Intentar fast-forward; si falla (divergencia), hacer merge automático

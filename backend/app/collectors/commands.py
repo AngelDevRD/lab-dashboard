@@ -33,12 +33,17 @@ COMMANDS = {
     "top_mem": "ps -eo pid,comm,%mem --sort=-%mem --no-headers | head -5",
     "hostname": "hostname",
     "network_status": "cat /etc/network-guardian/status.json 2>/dev/null || echo '{}'",
-    # Reloj remoto: habilita el check "tiempo sincronizado" del Health Score
-    # de telemetria (ver AUDITORIA_PRECISION.md, seccion pendiente de
-    # sincronizacion temporal). Un numero, cacheado 5 min (SLOW_COMMAND_TTLS)
-    # -- el drift de reloj no cambia rapido, no hace falta pedirlo cada poll.
-    "clock": "date +%s.%N",
 }
+
+# Reloj remoto: habilita el check "tiempo sincronizado" del Health Score de
+# telemetria. Corre SOLO, como HOSTNAME_CMD, con su propio round-trip
+# cronometrado -- si fuera parte del batch (COMMANDS) el "ahora" de
+# referencia se capturaria antes de que corran los demas comandos del batch,
+# mezclando el desfasaje de reloj real con el tiempo que tarda el resto de
+# la tanda (revision de precision: "el offset puede estar midiendo latencia
+# de red, no desfasaje de reloj"). Cacheado 5 min (ver collector.py) -- el
+# drift de reloj no cambia rapido.
+CLOCK_CMD = "date +%s.%N"
 
 # Run alone, before the rest of the batch: a fast, cheap round-trip used to
 # measure real connection latency and connectivity. It must never be mixed
@@ -53,7 +58,6 @@ SLOW_COMMAND_TTLS = {
     "updates": 1800,
     "docker_disk": 300,
     "disk_temp": 600,
-    "clock": 300,
 }
 
 INTERNET_COMMANDS = {

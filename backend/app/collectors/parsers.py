@@ -350,10 +350,13 @@ def parse_ping(raw: str) -> float | None:
 
 def parse_clock(raw: str, reference_now: float) -> float | None:
     """Offset (segundos) entre el reloj del servidor remoto y el del
-    dashboard: remote - reference_now. Precision de +-1-2s (el comando corre
-    en el mismo batch SSH que el resto, no es una medicion tipo NTP con
-    compensacion de RTT) -- alcanza para detectar un reloj realmente
-    desincronizado (drift de minutos/horas), no para medir jitter fino."""
+    dashboard: remote - reference_now. `reference_now` debe ser el punto
+    medio entre el envio y la respuesta del comando (ver
+    collector.py: _measure_clock_offset), estilo NTP -- eso compensa
+    aproximadamente la mitad del RTT en vez de mezclarlo con el offset real.
+    Sigue siendo una estimacion (asume ida y vuelta simetricos), suficiente
+    para detectar un reloj realmente desincronizado (drift de minutos/horas),
+    no para medir jitter fino."""
     raw = raw.strip()
     try:
         remote_ts = float(raw)

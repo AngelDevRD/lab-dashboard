@@ -24,9 +24,16 @@ class FakeConnUnreachable:
 
 
 class FakeConnHealthy:
+    """hostname (latencia) y date +%s.%N (offset de reloj) corren cada uno
+    con su propio round-trip dedicado, ver collector.py -- ambos deben
+    responder aca, no solo "hostname"."""
+
     async def run(self, command):
-        assert command == "hostname"
-        return True, "srv1\n"
+        if command == "hostname":
+            return True, "srv1\n"
+        if command == "date +%s.%N":
+            return True, "1800000000.0\n"
+        raise AssertionError(f"comando inesperado en conn.run: {command!r}")
 
     async def run_many(self, commands):
         return {key: (True, "") for key in commands}

@@ -104,6 +104,60 @@ class TestDynamicScoring:
         assert "no respondieron" in result["note"]
 
 
+class TestReasons:
+    """Codigos machine-readable para que el frontend arme tooltips sin
+    parsear texto libre (pedido de revision)."""
+
+    def test_sensor_missing_reason(self):
+        assert confidence.score_bounded_metric("cpu", None, None, 0, 100)["reasons"] == ["sensor_missing"]
+
+    def test_value_out_of_range_reason(self):
+        assert confidence.score_bounded_metric("cpu", 500, None, 0, 100)["reasons"] == ["value_out_of_range"]
+
+    def test_frozen_reason(self):
+        r = confidence.score_bounded_metric("cpu", 12, [12, 12, 12, 12], 0, 100)
+        assert r["reasons"] == ["frozen"]
+
+    def test_power_stale_reason(self):
+        r = confidence.score_power({"available": True}, power_age_s=700)
+        assert r["reasons"] == ["power_stale"]
+
+    def test_clean_reading_has_no_reasons(self):
+        r = confidence.score_bounded_metric("cpu", 12, [10, 11, 12], 0, 100)
+        assert r["reasons"] == []
+
+    def test_autonomy_unvalidated_reason(self):
+        assert confidence.score_autonomy(None)["reasons"] == ["model_unvalidated"]
+
+    def test_clock_offset_reason(self):
+        assert confidence.score_clock(120.0)["reasons"] == ["clock_offset"]
+
+    def test_health_check_carries_reasons_through(self):
+        scores = {"power": confidence.score_power({"available": True}, power_age_s=700)}
+        health = confidence.telemetry_health(scores)
+        assert health["checks"][0]["reasons"] == ["power_stale"]
+
+
+class TestWeightedHealthScore:
+    """Bateria/potencia/reloj/CPU pesan mas que temp. de disco o latencia
+    (pedido de revision: 'es mejor usar pesos')."""
+
+    def test_low_score_on_high_weight_metric_drags_overall_more(self):
+        # mismo score bajo (20), pero en una metrica de peso alto (power=3)
+        # vs una de peso bajo (disk_temp=1) -- el overall debe caer mas en
+        # el primer caso, con el resto de las metricas iguales.
+        base = {"cpu": {"score": 90, "note": None}, "mem": {"score": 90, "note": None}}
+        high_weight_bad = {**base, "power": {"score": 20, "note": None}}
+        low_weight_bad = {**base, "disk_temp": {"score": 20, "note": None}}
+        assert confidence.telemetry_health(high_weight_bad)["score"] < confidence.telemetry_health(low_weight_bad)["score"]
+
+    def test_weights_defined_for_critical_metrics(self):
+        for key in ("battery_percent", "power", "clock", "cpu"):
+            assert confidence.WEIGHTS[key] >= 2
+        for key in ("disk_temp", "latency", "docker"):
+            assert confidence.WEIGHTS[key] == 1
+
+
 class TestTelemetryHealth:
     def test_empty_confidence_scores_healthy_zero(self):
         result = confidence.telemetry_health({})

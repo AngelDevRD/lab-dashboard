@@ -3,10 +3,34 @@ import time
 from .. import config
 from ..ssh_client import SSHConnection, classify_ssh_error
 from . import parsers
-from .commands import COMMANDS, HOSTNAME_CMD, INTERNET_COMMANDS, SLOW_COMMAND_TTLS
+from .commands import CLOCK_CMD, COMMANDS, HOSTNAME_CMD, INTERNET_COMMANDS, SLOW_COMMAND_TTLS
 
 # host -> {command_key: (fetched_at, (ok, output))}
 _slow_cache: dict[str, dict[str, tuple[float, tuple[bool, str]]]] = {}
+
+# host -> (fetched_at, offset_s). Separado de _slow_cache porque esta
+# medicion necesita su propio round-trip cronometrado (ver
+# _measure_clock_offset), no puede compartir el "now" del batch de comandos.
+_clock_cache: dict[str, tuple[float, float | None]] = {}
+CLOCK_CHECK_TTL_S = 300
+
+
+async def _measure_clock_offset(host: str, conn: SSHConnection, now: float) -> float | None:
+    """Offset de reloj compensado por RTT (estilo NTP): mide t0 justo antes
+    de mandar el comando y t1 justo despues de la respuesta, y usa el punto
+    medio como "cuando" se tomo la lectura remota. Un round-trip dedicado,
+    separado del batch de COMMANDS, para no mezclar el desfasaje de reloj
+    real con el tiempo que tarda el resto de la tanda (revision de
+    precision de la auditoria)."""
+    cached = _clock_cache.get(host)
+    if cached and now - cached[0] < CLOCK_CHECK_TTL_S:
+        return cached[1]
+    t0 = time.time()
+    ok, raw = await conn.run(CLOCK_CMD)
+    t1 = time.time()
+    offset = parsers.parse_clock(raw, (t0 + t1) / 2) if ok else None
+    _clock_cache[host] = (now, offset)
+    return offset
 
 
 async def collect_server(server: dict, conn: SSHConnection) -> dict:
@@ -35,6 +59,8 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
             # No latency_ms here on purpose: a failed/timed-out probe has no
             # meaningful latency value and must not be treated as one.
         }
+
+    clock_offset_s = await _measure_clock_offset(host, conn, now)
 
     cache = _slow_cache.setdefault(host, {})
     commands = {
@@ -82,7 +108,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
         "power": parsers.parse_battery(out("battery")),
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
-        "clock_offset_s": parsers.parse_clock(out("clock"), now),
+        "clock_offset_s": clock_offset_s,
         "top_cpu": parsers.parse_top_procs(out("top_cpu")),
         "top_mem": parsers.parse_top_procs(out("top_mem")),
         "network": parsers.parse_network_status(out("network_status")),
