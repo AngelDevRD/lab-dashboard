@@ -82,6 +82,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
         "power": parsers.parse_battery(out("battery")),
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
+        "clock_offset_s": parsers.parse_clock(out("clock"), now),
         "top_cpu": parsers.parse_top_procs(out("top_cpu")),
         "top_mem": parsers.parse_top_procs(out("top_mem")),
         "network": parsers.parse_network_status(out("network_status")),

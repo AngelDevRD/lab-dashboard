@@ -26,6 +26,11 @@ class Monitor:
         self._daily_baseline: dict[str, tuple[str, int, int]] = {}
         self._cpu_history: dict[str, deque] = {}
         self._mem_history: dict[str, deque] = {}
+        # Ring buffer chico (ok/fail de los ultimos ciclos de poll) para el
+        # check de "conectividad estable" del Health Score de telemetria —
+        # ver AUDITORIA_PRECISION.md. No es un ping externo nuevo, reusa la
+        # misma senal online/offline que ya se calcula cada ciclo.
+        self._online_history: dict[str, deque] = {}
         self._autonomy_state: dict[str, autonomy.HostAutonomyState] = {}
         self._server_order: list[str] = []
         self.internet_down_since: float | None = None
@@ -59,6 +64,8 @@ class Monitor:
 
         was_online = self._prev_online.get(server["host"])
         is_online = snapshot["online"]
+        online_hist = self._online_history.setdefault(server["host"], deque(maxlen=20))
+        online_hist.append(is_online)
         if was_online is not None and was_online != is_online:
             if is_online:
                 events.log_event(
@@ -253,11 +260,18 @@ class Monitor:
                     "complete_discharges": autonomy_result["complete_discharges"],
                     "reliability": autonomy_result["reliability"],
                 }
+            online_hist = self._online_history.get(h, deque())
+            online_ratio = (sum(online_hist) / len(online_hist)) if online_hist else None
             s["confidence"] = confidence.for_server(
                 s,
                 power_age_s=autonomy_result["power_age_s"] if autonomy_result else None,
                 autonomy_result=autonomy_result,
+                cpu_history=list(self._cpu_history.get(h, []))[-5:],
+                mem_history=list(self._mem_history.get(h, []))[-5:],
+                clock_offset_s=s.get("clock_offset_s"),
+                online_ratio=online_ratio,
             )
+            s["telemetry_health"] = confidence.telemetry_health(s["confidence"])
             servers.append(s)
         online_count = sum(1 for s in servers if s.get("online"))
         return {

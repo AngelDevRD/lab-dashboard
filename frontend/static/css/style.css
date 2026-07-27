@@ -501,6 +501,32 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 
 #detail-disk-temp-row.hidden { display: none; }
 
+/* Estado de telemetria (Health Score) — no es salud del hardware, es cuanto
+   se puede confiar en lo que se esta mostrando ahora mismo (ver
+   AUDITORIA_PRECISION.md). */
+.health-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.health-score { font-size: 2rem; font-weight: 800; line-height: 1; }
+.health-label { font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.health-score.good, .health-label.good { color: var(--ok); }
+.health-score.warn, .health-label.warn { color: var(--warn); }
+.health-score.bad, .health-label.bad { color: var(--bad); }
+.health-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 14px;
+}
+.health-checks li { font-size: 0.8rem; line-height: 1.4; }
+.health-checks li.ok { color: var(--text-2); }
+.health-checks li.warn { color: var(--warn); font-weight: 600; }
+
 .pd-bar-row {
   display: flex;
   align-items: center;

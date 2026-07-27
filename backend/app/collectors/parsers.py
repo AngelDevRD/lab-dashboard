@@ -348,6 +348,20 @@ def parse_ping(raw: str) -> float | None:
     return None
 
 
+def parse_clock(raw: str, reference_now: float) -> float | None:
+    """Offset (segundos) entre el reloj del servidor remoto y el del
+    dashboard: remote - reference_now. Precision de +-1-2s (el comando corre
+    en el mismo batch SSH que el resto, no es una medicion tipo NTP con
+    compensacion de RTT) -- alcanza para detectar un reloj realmente
+    desincronizado (drift de minutos/horas), no para medir jitter fino."""
+    raw = raw.strip()
+    try:
+        remote_ts = float(raw)
+    except ValueError:
+        return None
+    return round(remote_ts - reference_now, 1)
+
+
 def parse_network_status(raw: str) -> dict:
     """Parses the JSON status file written locally by network_guardian_agent.py."""
     raw = raw.strip()

@@ -21,6 +21,7 @@ from app.collectors.parsers import (
     parse_ping_extended,
     parse_tailscale_ip,
     parse_system_info,
+    parse_clock,
 )
 
 
@@ -311,3 +312,19 @@ class TestParseSystemInfo:
         assert result["kernel"] == "6.8.0-136-generic"
         assert result["arch"] == "x86_64"
         assert result["boot_at"] is not None
+
+
+class TestParseClock:
+    def test_synced(self):
+        now = 1_800_000_000.0
+        assert parse_clock(f"{now:.3f}", now) == 0.0
+
+    def test_ahead(self):
+        now = 1_800_000_000.0
+        assert parse_clock(f"{now + 120:.3f}", now) == 120.0
+
+    def test_malformed(self):
+        assert parse_clock("not-a-number", 1_800_000_000.0) is None
+
+    def test_empty(self):
+        assert parse_clock("", 1_800_000_000.0) is None

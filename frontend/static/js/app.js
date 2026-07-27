@@ -499,9 +499,35 @@
     return " down";
   }
 
+  function renderHealthScore(s) {
+    const health = s.telemetry_health;
+    const scoreEl = document.getElementById("detail-health-score");
+    const labelEl = document.getElementById("detail-health-label");
+    const checksEl = document.getElementById("detail-health-checks");
+    if (!health) {
+      scoreEl.textContent = "--";
+      labelEl.textContent = "";
+      checksEl.textContent = "";
+      return;
+    }
+    scoreEl.textContent = `${health.score}%`;
+    labelEl.textContent = health.label;
+    const labelClass = health.score >= 75 ? "good" : health.score >= 50 ? "warn" : "bad";
+    scoreEl.className = `health-score ${labelClass}`;
+    labelEl.className = `health-label ${labelClass}`;
+    checksEl.textContent = "";
+    for (const check of health.checks || []) {
+      const li = document.createElement("li");
+      li.className = check.ok ? "ok" : "warn";
+      li.textContent = `${check.ok ? "✓" : "⚠"} ${check.text}`;
+      checksEl.appendChild(li);
+    }
+  }
+
   function renderDetail(s) {
     document.getElementById("detail-name").textContent = s.name;
     if (!s.online) return;
+    renderHealthScore(s);
     document.getElementById("detail-uptime").textContent = s.uptime?.pretty || "--";
     document.getElementById("detail-load").textContent =
       `${s.load?.load1 ?? "--"} / ${s.load?.load5 ?? "--"} / ${s.load?.load15 ?? "--"}`;
