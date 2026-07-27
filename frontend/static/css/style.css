@@ -470,6 +470,37 @@ body[data-view="metrics"] #nav-metrics-btn { display: none; }
 .detail-body h3 { font-size: 0.85rem; color: var(--text-2); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .08em; }
 .detail-section:first-child h3 { margin-top: 0; }
 
+/* Separacion "sensor" vs "estimacion" dentro de una seccion (ver
+   AUDITORIA_PRECISION.md: no mezclar un dato medido con uno extrapolado). */
+.detail-subhead {
+  font-size: 0.65rem;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin: 4px 0 6px;
+  opacity: .7;
+}
+#detail-autonomy-block.low-confidence > div {
+  border: 1px solid rgba(251, 191, 36, .35);
+}
+
+/* Badge chico de confianza en las tarjetas (solo visible cuando el score es
+   bajo, <50% — ver setConfBadge en app.js). */
+.conf-badge {
+  font-size: 0.62em;
+  font-weight: 700;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, .15);
+  color: var(--warn);
+  vertical-align: middle;
+  cursor: help;
+}
+.conf-badge.hidden { display: none; }
+
+#detail-disk-temp-row.hidden { display: none; }
+
 .pd-bar-row {
   display: flex;
   align-items: center;

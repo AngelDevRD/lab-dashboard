@@ -219,6 +219,7 @@
         <div class="mini">
           <span class="mini-label" title="Consumo actual"><svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg></span>
           <span class="mini-value power-watts">--</span>
+          <span class="conf-badge power-conf hidden" title=""></span>
         </div>
         <div class="mini">
           <span class="mini-label" title="Batería"><svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg></span>
@@ -235,6 +236,7 @@
         <div class="mini">
           <span class="mini-label" title="Autonomía"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2"></path></svg></span>
           <span class="mini-value autonomy-value">--</span>
+          <span class="conf-badge autonomy-conf hidden" title=""></span>
         </div>
       </div>
 
@@ -266,10 +268,20 @@
 
         <section class="detail-section">
           <h3><svg class="icon-svg icon-svg-inline" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg> Energía</h3>
+          <h4 class="detail-subhead">Sensores</h4>
           <div class="detail-grid">
             <div><span class="label">Consumo actual</span><span class="value" id="adv-power-now">--</span></div>
             <div><span class="label">Método</span><span class="value" id="adv-power-method">--</span></div>
-            <div><span class="label">Última actualización</span><span class="value" id="detail-last-update">--</span></div>
+            <div><span class="label">Antigüedad real del dato</span><span class="value" id="detail-power-age">--</span></div>
+            <div><span class="label">Confianza</span><span class="value" id="detail-power-confidence">--</span></div>
+            <div><span class="label">Última actualización (poll)</span><span class="value" id="detail-last-update">--</span></div>
+          </div>
+          <h4 class="detail-subhead">Estimación</h4>
+          <div class="detail-grid" id="detail-autonomy-block">
+            <div><span class="label">Modelo</span><span class="value" id="detail-autonomy-model">--</span></div>
+            <div><span class="label">Estado</span><span class="value" id="detail-autonomy-state">--</span></div>
+            <div><span class="label">Descargas completas registradas</span><span class="value" id="detail-autonomy-discharges">--</span></div>
+            <div><span class="label">Confiabilidad</span><span class="value" id="detail-autonomy-reliability">--</span></div>
           </div>
         </section>
 
@@ -300,7 +312,7 @@
           <div class="detail-grid">
             <div><span class="label">Espacio usado / total</span><span class="value" id="detail-disk">--</span></div>
             <div><span class="label">I/O actual</span><span class="value" id="adv-disk-io">--</span></div>
-            <div><span class="label">Temp. SSD</span><span class="value" id="detail-disk-temp">--</span></div>
+            <div id="detail-disk-temp-row"><span class="label">Temp. SSD</span><span class="value" id="detail-disk-temp">--</span></div>
             <div><span class="label">Estado SMART</span><span class="value" id="adv-disk-smart">--</span></div>
             <div><span class="label">Disco Docker</span><span class="value" id="detail-docker-disk">--</span></div>
           </div>

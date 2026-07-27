@@ -59,28 +59,41 @@ def parse_cpu(raw: str, host: str) -> dict:
 
 
 def parse_cpu_temp(raw: str) -> dict:
-    """Returns {"value": <primary/avg temp>, "per_core": [temps...]}."""
+    """Returns {"value": <primary temp>, "per_core": [temps...]}.
+
+    "value" prioriza la temperatura de paquete completo (label "Package id"),
+    que es la metrica estandar de coretemp; si no esta, promedia los nucleos
+    reales (label "Core N"). Nunca cae a "el primer *_input que aparezca" —
+    eso mezclaba lecturas de voltaje de bateria o del chip WiFi (que en
+    `sensors -j` suelen listarse antes que coretemp en el JSON) con
+    temperaturas reales, sesgando el promedio varios grados sin ningun aviso
+    (confirmado en angel1/angel2: `in0_input` = voltios de BAT1, y
+    `temp1_input` del chip iwlwifi, se colaban en el promedio de "CPU temp").
+    """
     raw = raw.strip()
     if not raw:
         return {"value": None, "per_core": []}
     try:
         data = json.loads(raw)
         per_core: list[float] = []
+        package_temp: float | None = None
         for chip in data.values():
             for label, sensor in chip.items():
                 if not isinstance(sensor, dict):
                     continue
                 for k, v in sensor.items():
-                    if "input" in k and isinstance(v, (int, float)):
-                        if re.search(r"core|cpu", label, re.IGNORECASE):
-                            per_core.append(round(float(v), 1))
-                        elif not per_core:
-                            per_core.append(round(float(v), 1))
-        if per_core:
-            return {
-                "value": round(sum(per_core) / len(per_core), 1),
-                "per_core": per_core,
-            }
+                    if "input" not in k or not isinstance(v, (int, float)):
+                        continue
+                    if re.search(r"package", label, re.IGNORECASE):
+                        package_temp = round(float(v), 1)
+                    elif re.search(r"core\s*\d+", label, re.IGNORECASE):
+                        per_core.append(round(float(v), 1))
+        if package_temp is not None or per_core:
+            value = (
+                package_temp if package_temp is not None
+                else round(sum(per_core) / len(per_core), 1)
+            )
+            return {"value": value, "per_core": per_core}
     except (json.JSONDecodeError, AttributeError):
         pass
     nums = [int(x) for x in raw.splitlines() if x.strip().isdigit()]

@@ -48,6 +48,46 @@ class TestParseCpuTemp:
         assert result["value"] == 55.0
         assert result["per_core"] == [55.0, 62.0]
 
+    def test_ignores_non_temperature_sensors_before_coretemp(self):
+        """Regresion: en angel1/angel2 (auditoria de precision) `sensors -j`
+        lista el chip de bateria (voltaje, no temperatura) o el chip WiFi
+        *antes* que coretemp en el JSON. La version vieja tomaba "el primer
+        *_input que aparezca" y devolvia 40.6C (voltaje de bateria) en vez
+        de los ~49C reales de los nucleos."""
+        raw = """
+        {
+          "BAT1-acpi-0": {"Adapter": "ACPI interface", "in0": {"in0_input": 7.895}},
+          "coretemp-isa-0000": {
+            "Adapter": "ISA adapter",
+            "Package id 0": {"temp1_input": 49.0},
+            "Core 0": {"temp2_input": 49.0},
+            "Core 1": {"temp3_input": 49.0},
+            "Core 2": {"temp4_input": 49.0},
+            "Core 3": {"temp5_input": 48.0}
+          },
+          "acpitz-acpi-0": {"Adapter": "ACPI interface", "temp1": {"temp1_input": 49.0}}
+        }
+        """
+        result = parse_cpu_temp(raw)
+        assert result["value"] == 49.0  # Package id, no el voltaje de BAT1
+        assert result["per_core"] == [49.0, 49.0, 49.0, 48.0]
+
+    def test_prefers_package_over_core_average(self):
+        raw = """
+        {"coretemp-isa-0000": {
+          "Package id 0": {"temp1_input": 42.0},
+          "Core 0": {"temp2_input": 40.0},
+          "Core 1": {"temp3_input": 44.0}
+        }}
+        """
+        result = parse_cpu_temp(raw)
+        assert result["value"] == 42.0
+        assert result["per_core"] == [40.0, 44.0]
+
+    def test_no_coretemp_falls_back_to_none(self):
+        raw = '{"BAT0-acpi-0": {"Adapter": "ACPI interface", "in0": {"in0_input": 7.7}}}'
+        assert parse_cpu_temp(raw) == {"value": None, "per_core": []}
+
 
 class TestParseTopProcs:
     def test_empty(self):

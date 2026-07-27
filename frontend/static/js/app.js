@@ -83,6 +83,12 @@
     return Math.round(sec / 300) * 300;
   }
 
+  function fmtAge(sec) {
+    if (sec < 60) return "hace unos segundos";
+    if (sec < 3600) return `hace ${Math.round(sec / 60)} min`;
+    return `hace ${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`;
+  }
+
   function fmtAuto(sec) {
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
@@ -145,6 +151,20 @@
     }
   }
 
+  // Badge chico de confianza (ver AUDITORIA_PRECISION.md): solo se muestra
+  // cuando el score es bajo (<50%), para no ensuciar la tarjeta cuando el
+  // dato es confiable — ahí no aporta nada verlo.
+  function setConfBadge(el, entry) {
+    if (!el) return;
+    if (!entry || entry.score >= 50) {
+      el.classList.add("hidden");
+      return;
+    }
+    el.textContent = `${entry.score}%`;
+    el.title = entry.note ? `${entry.source} — ${entry.note}` : entry.source;
+    el.classList.remove("hidden");
+  }
+
   function statusLevel(s) {
     if (!s.online) return "red";
     const pct = [s.cpu?.percent, s.mem?.percent, s.disk?.percent].filter((v) => v != null);
@@ -174,6 +194,8 @@
         temp: el.querySelector(".cpu-temp"),
         power: el.querySelector(".power-value"),
         powerWatts: el.querySelector(".power-watts"),
+        powerConf: el.querySelector(".power-conf"),
+        autonomyConf: el.querySelector(".autonomy-conf"),
         docker: el.querySelector(".docker-summary"),
         hdrDocker: el.querySelector(".hdr-docker"),
         hdrBattery: el.querySelector(".hdr-battery"),
@@ -236,6 +258,8 @@
       setText(refs, "wifiNetwork", "--");
       setText(refs, "wifiPing", "");
       setText(refs, "autonomy", "--");
+      refs.el.powerConf.classList.add("hidden");
+      refs.el.autonomyConf.classList.add("hidden");
       setBadge(refs, "hdrDocker", false);
       setBadge(refs, "hdrBattery", false);
       autoState.delete(s.host);
@@ -285,6 +309,9 @@
     }
     setText(refs, "powerWatts", power.available && power.power_now_w != null ? `${power.power_now_w.toFixed(1)}W` : "--");
     setBadge(refs, "hdrBattery", power.available && (power.status || "").toLowerCase() === "discharging");
+    const conf = s.confidence || {};
+    setConfBadge(refs.el.powerConf, conf.power);
+    setConfBadge(refs.el.autonomyConf, conf.autonomy);
 
     const docker = s.docker || {};
     setText(refs, "docker", docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--");
@@ -490,7 +517,16 @@
     document.getElementById("detail-swap").textContent =
       swap && swap.total ? `${bytesFmt(swap.used)} / ${bytesFmt(swap.total)} (${swap.percent}%)` : "sin uso";
     document.getElementById("detail-disk").textContent = `${bytesFmt(s.disk?.used)} / ${bytesFmt(s.disk?.total)}`;
-    document.getElementById("detail-disk-temp").textContent = s.disk_temp != null ? `${s.disk_temp}°C` : "--";
+    // disk_temp (smartctl) siempre vuelve vacio con el usuario de servicio
+    // actual (sin root) — ver AUDITORIA_PRECISION.md. Ocultar la fila en vez
+    // de mostrar "--" permanente, que sugiere "temporalmente no disponible".
+    const diskTempRow = document.getElementById("detail-disk-temp-row");
+    if (s.disk_temp != null) {
+      diskTempRow.classList.remove("hidden");
+      document.getElementById("detail-disk-temp").textContent = `${s.disk_temp}°C`;
+    } else {
+      diskTempRow.classList.add("hidden");
+    }
     document.getElementById("detail-docker-disk").textContent = s.docker_disk
       ? bytesFmt(s.docker_disk.total_bytes)
       : "--";
@@ -504,6 +540,31 @@
       power.available && power.power_now_w != null ? `${power.power_now_w.toFixed(1)}W` : "--";
     document.getElementById("detail-last-update").textContent =
       s.last_update ? new Date(s.last_update * 1000).toLocaleTimeString() : "--";
+
+    // Antiguedad real + confianza de power_now (ver AUDITORIA_PRECISION.md:
+    // en angel2 el firmware solo lo actualiza cada ~9-15 min, no en cada
+    // muestreo — esto evita que parezca una lectura instantanea cuando no
+    // lo es).
+    document.getElementById("detail-power-age").textContent =
+      power.age_s != null ? fmtAge(power.age_s) : "--";
+    const powerConf = (s.confidence || {}).power;
+    document.getElementById("detail-power-confidence").textContent =
+      powerConf ? `${powerConf.score}%${powerConf.note ? " — " + powerConf.note : ""}` : "--";
+
+    // Estado de validacion del modelo de autonomia: sin al menos una
+    // descarga completa real, cualquier numero de autonomia es una
+    // extrapolacion sin verificar, no un dato confiable (hallazgo central
+    // de la auditoria).
+    const validated = power.validated === true;
+    document.getElementById("detail-autonomy-model").textContent = validated ? "Calibrado" : "En entrenamiento";
+    document.getElementById("detail-autonomy-state").textContent = validated ? "Validado" : "Validación insuficiente";
+    document.getElementById("detail-autonomy-discharges").textContent =
+      power.complete_discharges != null ? String(power.complete_discharges) : "0";
+    const reliabilityLabel = { alta: "Alta", media: "Media", baja: "Baja" };
+    document.getElementById("detail-autonomy-reliability").textContent =
+      reliabilityLabel[power.reliability] || "Baja";
+    const autonomyBlock = document.getElementById("detail-autonomy-block");
+    autonomyBlock.classList.toggle("low-confidence", !validated);
 
     const docker = s.docker || {};
     document.getElementById("detail-docker-count").textContent =

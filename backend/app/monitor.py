@@ -6,7 +6,7 @@ from datetime import date
 
 from . import config, events
 from .alerts.service import notification_service
-from .collectors import autonomy
+from .collectors import autonomy, confidence
 from .collectors.collector import collect_internet, collect_server
 from .ssh_client import pool
 
@@ -238,16 +238,26 @@ class Monitor:
             }
             state = self._autonomy_state.get(h)
             pwr = s.get("power")
+            autonomy_result = None
             if state and pwr and pwr.get("available"):
-                result = autonomy.estimate(
-                    state, pwr.get("status"), pwr.get("energy_now_wh"), pwr.get("energy_full_wh")
+                autonomy_result = autonomy.estimate(
+                    state, pwr.get("status"), pwr.get("energy_now_wh"), pwr.get("energy_full_wh"),
+                    capacity_pct=pwr.get("percent"),
                 )
-                if result["autonomy_seconds"] is not None:
-                    s["power"] = {
-                        **pwr,
-                        "autonomy_seconds": result["autonomy_seconds"],
-                        "autonomy_mode": result["mode"],
-                    }
+                s["power"] = {
+                    **pwr,
+                    "autonomy_seconds": autonomy_result["autonomy_seconds"],
+                    "autonomy_mode": autonomy_result["mode"],
+                    "age_s": autonomy_result["power_age_s"],
+                    "validated": autonomy_result["validated"],
+                    "complete_discharges": autonomy_result["complete_discharges"],
+                    "reliability": autonomy_result["reliability"],
+                }
+            s["confidence"] = confidence.for_server(
+                s,
+                power_age_s=autonomy_result["power_age_s"] if autonomy_result else None,
+                autonomy_result=autonomy_result,
+            )
             servers.append(s)
         online_count = sum(1 for s in servers if s.get("online"))
         return {

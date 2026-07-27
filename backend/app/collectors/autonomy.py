@@ -61,6 +61,14 @@ CONFIRM_CYCLES = 3  # Paso 3: "confirmarlo durante varios ciclos" -> 15 min
 DIVERGENCE_THRESHOLD = 0.15  # error > 15% vs la potencia real derivada, sostenido -> calibrar
 CALIBRATION_WEIGHT = 0.2  # Paso 4: 80% power_now_avg30 + 20% derivada
 
+# Auditoria de precision (ver AUDITORIA_PRECISION.md): ningun metodo de
+# autonomia se pudo evaluar de forma valida porque nunca hubo un tramo de
+# descarga que terminara por agotamiento real -- terminaban porque alguien
+# reconectaba el cargador a mitad de camino. Un tramo solo cuenta como
+# "descarga completa" (y por lo tanto como base real para confiar en el
+# modelo) si la bateria llego a nivel critico estando en Discharging.
+DISCHARGE_COMPLETE_THRESHOLD_PCT = 15
+
 
 class Mode(str, Enum):
     NORMAL = "normal"
@@ -80,6 +88,14 @@ class HostAutonomyState:
     stale_streak: int = 0
     mode: Mode = Mode.NORMAL
     last_calibration_ts: float | None = None
+    # Antiguedad real de power_now (ver auditoria: en angel2 el firmware solo
+    # lo actualiza cada ~9-15 min, no en cada muestreo).
+    last_power_value: float | None = None
+    last_power_change_ts: float | None = None
+    # Validacion del modelo por descargas completas reales (ver arriba).
+    last_status: str | None = None
+    discharge_counted: bool = False
+    complete_discharges: int = 0
 
 
 def _trim(buf: deque, now: float, window_s: float) -> None:
@@ -90,11 +106,48 @@ def _trim(buf: deque, now: float, window_s: float) -> None:
 def record_sample(state: HostAutonomyState, now: float, power_w: float | None, energy_wh: float | None) -> None:
     """Lectura ya convertida (viene de parsers.parse_battery) -> guardar para las etapas siguientes."""
     if power_w is not None:
+        if state.last_power_value is None or abs(power_w - state.last_power_value) > 1e-9:
+            state.last_power_change_ts = now
+        state.last_power_value = power_w
         state.power_samples.append((now, power_w))
         _trim(state.power_samples, now, CHECK_INTERVAL_S)
     if energy_wh is not None:
         state.energy_samples.append((now, energy_wh))
         _trim(state.energy_samples, now, CHECK_INTERVAL_S)
+
+
+def track_discharge_cycle(state: HostAutonomyState, now: float, status: str | None, capacity_pct: float | None) -> None:
+    """Cuenta una descarga como 'completa' solo si la bateria realmente llego
+    a nivel critico (<DISCHARGE_COMPLETE_THRESHOLD_PCT%) estando en
+    Discharging -- no cuando el tramo termina porque se reconecto el
+    cargador a mitad de camino (ver auditoria de precision: eso invalidaba
+    cualquier comparacion de metodos de autonomia hecha hasta ahora)."""
+    if status == "Discharging" and state.last_status != "Discharging":
+        state.discharge_counted = False
+    if status == "Discharging" and not state.discharge_counted:
+        if capacity_pct is not None and capacity_pct < DISCHARGE_COMPLETE_THRESHOLD_PCT:
+            state.complete_discharges += 1
+            state.discharge_counted = True
+    state.last_status = status
+
+
+def validation_status(state: HostAutonomyState, now: float) -> dict:
+    """Estado de validacion del modelo: sin al menos 1 descarga completa
+    registrada, cualquier MAE/RMSE/'mejor metodo' no tiene ground truth real
+    contra el cual medirse (ver auditoria)."""
+    power_age_s = (
+        round(now - state.last_power_change_ts)
+        if state.last_power_change_ts is not None
+        else None
+    )
+    validated = state.complete_discharges >= 1
+    reliability = "alta" if state.complete_discharges >= 3 else ("media" if validated else "baja")
+    return {
+        "power_age_s": power_age_s,
+        "validated": validated,
+        "complete_discharges": state.complete_discharges,
+        "reliability": reliability,
+    }
 
 
 def rolling_power_avg30(state: HostAutonomyState, now: float) -> float | None:
@@ -253,6 +306,7 @@ def metrics(state: HostAutonomyState) -> dict:
         "calibration_factor": factor,
         "samples": len(state.power_samples),
         "last_calibration": state.last_calibration_ts,
+        **validation_status(state, now),
     }
 
 
@@ -271,11 +325,21 @@ def autonomy_seconds(status: str | None, energy_now_wh: float | None, energy_ful
     return None
 
 
-def estimate(state: HostAutonomyState, status: str | None, energy_now_wh: float | None, energy_full_wh: float | None, now: float | None = None) -> dict:
+def estimate(
+    state: HostAutonomyState,
+    status: str | None,
+    energy_now_wh: float | None,
+    energy_full_wh: float | None,
+    now: float | None = None,
+    capacity_pct: float | None = None,
+) -> dict:
     """Punto de entrada unico para el monitor: registra la muestra, corre el
     ciclo de calibracion si toca, y devuelve la autonomia final mas todo lo
-    necesario para el log."""
+    necesario para el log -- incluida la validacion del modelo (ver
+    validation_status): sin descargas completas reales, "autonomy_seconds"
+    es una extrapolacion sin verificar, no un numero confiable."""
     now = now if now is not None else time.time()
+    track_discharge_cycle(state, now, status, capacity_pct)
     check = evaluate(state, now)
     power_used, factor = blended_power(state, now)
     seconds = autonomy_seconds(status, energy_now_wh, energy_full_wh, power_used)
@@ -285,4 +349,5 @@ def estimate(state: HostAutonomyState, status: str | None, energy_now_wh: float 
         "calibration_factor": factor,
         "mode": state.mode.value,
         "check": check,
+        **validation_status(state, now),
     }
