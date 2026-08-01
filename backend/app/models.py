@@ -18,6 +18,7 @@ class FieldMeta(BaseModel):
 
     origin: str
     model: str | None = None
+    smoothed: bool | None = None
 
 
 class PowerMetrics(BaseModel):
@@ -30,6 +31,7 @@ class PowerMetrics(BaseModel):
     energy_now_wh: float | None = None
     energy_full_wh: float | None = None
     power_now_w: float | None = None
+    power_now_raw_w: float | None = None
     autonomy_seconds: float | None = None
     autonomy_mode: str | None = None
     age_s: float | None = None

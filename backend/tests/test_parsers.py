@@ -119,6 +119,35 @@ class TestParseBattery:
         assert result["voltage"] is None
         assert result["percent"] == 80
 
+    def test_energy_fallback_uses_filtered_voltage_not_instant_spike(self):
+        """charge_now*V es el unico camino a energy_now cuando el firmware no
+        expone energy_now (caso angel1). Una caida transitoria de voltaje
+        (pico de IR bajo carga de CPU) no debe pegarle de lleno a energy_now
+        -- ver comentario en parsers.parse_battery."""
+        host = "test-host-energy-fallback"
+        # parts: capacity|status|voltage|energy_now|energy_full|power_now|
+        #        time_to_empty|time_to_full|charge_now|charge_full|current_now
+        stable_line = "80|Charging|8500000||||||2500000|2900000|"
+        for _ in range(20):
+            parse_battery(stable_line, host)
+        # Voltaje cae de golpe una sola muestra (pico de IR transitorio).
+        spike_line = "80|Charging|8000000||||||2500000|2900000|"
+        result = parse_battery(spike_line, host)
+        # energy_now = charge_now * voltaje_filtrado -- el voltaje filtrado
+        # todavia no llego a 8.0V tras un solo pico (EMA alpha=0.1), asi que
+        # energy_now no debe caer tanto como si hubiera usado el voltaje crudo.
+        raw_voltage_energy = 2500000 * 8_000_000 / 1_000_000 / 1_000_000
+        assert result["energy_now_wh"] > raw_voltage_energy
+
+    def test_power_now_stays_instantaneous(self):
+        """power_now (a diferencia de energy_now) debe seguir usando el
+        voltaje crudo de la muestra -- tiene que reaccionar al instante."""
+        host = "test-host-power-instant"
+        for _ in range(20):
+            parse_battery("80|Charging|8500000||||||||1000000", host)
+        result = parse_battery("80|Charging|8000000||||||||1000000", host)
+        assert result["power_now_w"] == round(1_000_000 * 8_000_000 / 1_000_000 / 1_000_000, 2)
+
 
 class TestParseUpdates:
     def test_empty(self):

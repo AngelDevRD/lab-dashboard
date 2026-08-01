@@ -206,7 +206,14 @@ def parse_services(raw: str, service_names: list[str]) -> dict:
     return result
 
 
-def parse_battery(raw: str) -> dict:
+# host -> voltaje filtrado (EMA), en microvoltios. Ver comentario en
+# parse_battery: solo se usa para el fallback charge_now*V -> energy_now,
+# nunca para power_now (que debe seguir reaccionando al instante).
+_voltage_ema_uv: dict[str, float] = {}
+VOLTAGE_EMA_ALPHA = 0.1
+
+
+def parse_battery(raw: str, host: str = "") -> dict:
     raw = raw.strip()
     if not raw:
         return {"available": False}
@@ -237,6 +244,18 @@ def parse_battery(raw: str) -> dict:
 
     voltage_uv = int(voltage) if voltage.isdigit() else None
 
+    # Voltaje EMA por host, solo para el fallback charge_now*V -> energy_now
+    # (ver docstring de mas abajo). power_now sigue usando voltage_uv crudo
+    # sin filtrar: ahi la reaccion instantanea es lo que se quiere.
+    voltage_uv_filtered = voltage_uv
+    if voltage_uv is not None:
+        prev = _voltage_ema_uv.get(host)
+        voltage_uv_filtered = (
+            voltage_uv if prev is None
+            else prev + VOLTAGE_EMA_ALPHA * (voltage_uv - prev)
+        )
+        _voltage_ema_uv[host] = voltage_uv_filtered
+
     def safe_float(v: str) -> float | None:
         try:
             return float(v)
@@ -260,12 +279,24 @@ def parse_battery(raw: str) -> dict:
     energy_full_origin = "measured" if e_full else None
     power_now_origin = "measured" if p_now else None
 
-    if not e_now and voltage_uv and c_now:
-        e_now = c_now * voltage_uv / 1_000_000
+    # energy_now/energy_full: usan el voltaje FILTRADO. Cuando el firmware no
+    # expone energy_now directamente (caso angel1), la unica forma de
+    # derivarlo es charge_now * voltaje. charge_now ya es un contador de
+    # carga integrado por el propio chip (confiable); pero si se multiplica
+    # por el voltaje instantaneo, una caida transitoria de tension por IR
+    # (picos de CPU, hasta ~40mV medidos en la auditoria) se cuela en
+    # energy_now -- justo la señal que autonomy.py usa como "verdad" para
+    # decidir si power_now es confiable. Filtrar el voltaje con una EMA
+    # rompe ese acoplamiento sin perder la integracion real de charge_now.
+    if not e_now and voltage_uv_filtered and c_now:
+        e_now = c_now * voltage_uv_filtered / 1_000_000
         energy_now_origin = "derived"
-    if not e_full and voltage_uv and c_full:
-        e_full = c_full * voltage_uv / 1_000_000
+    if not e_full and voltage_uv_filtered and c_full:
+        e_full = c_full * voltage_uv_filtered / 1_000_000
         energy_full_origin = "derived"
+    # power_now: voltaje SIN filtrar a proposito -- es la lectura "ahora
+    # mismo", el suavizado de esta va aparte (ver power_display en
+    # monitor.py), no debe mezclarse con el filtro de energy.
     if not p_now and voltage_uv and i_now:
         p_now = i_now * voltage_uv / 1_000_000
         power_now_origin = "derived"

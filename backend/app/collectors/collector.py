@@ -106,7 +106,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "docker_disk": parsers.parse_docker_disk(out("docker_disk")),
         "updates_pending": parsers.parse_updates(out("updates")),
         "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
-        "power": parsers.parse_battery(out("battery")),
+        "power": parsers.parse_battery(out("battery"), host),
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
         "clock_offset_s": clock_offset_s,
         "top_cpu": parsers.parse_top_procs(out("top_cpu")),

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import statistics
 import time
 from collections import deque
 from datetime import date
@@ -13,6 +14,17 @@ from .ssh_client import pool
 logger = logging.getLogger("dashboard")
 
 _POWER_ORIGIN_FIELDS = ("power_now_w", "energy_now_wh", "energy_full_wh")
+
+# Suavizado del power_now MOSTRADO en el dashboard (no toca el que usa
+# autonomy.py para calibrar -- ese ya tiene su propio promedio de 30s con
+# una logica auditada aparte, ver autonomy.rolling_power_avg30). Esto es
+# solo para que el numero en pantalla no "baile" muestra a muestra:
+#   1) mediana sobre una ventana -- descarta picos espurios de una sola
+#      lectura mejor que una media (un pico no mueve la mediana).
+#   2) EMA sobre esa mediana -- sigue reaccionando rapido a cambios reales
+#      sostenidos, pero sin el salto brusco entre dos muestras consecutivas.
+POWER_DISPLAY_WINDOW = 20  # ~60s a POLL_INTERVAL=3s
+POWER_DISPLAY_EMA_ALPHA = 0.3
 
 
 def _extract_power_meta(pwr: dict) -> dict:
@@ -49,6 +61,9 @@ class Monitor:
         # misma senal online/offline que ya se calcula cada ciclo.
         self._online_history: dict[str, deque] = {}
         self._autonomy_state: dict[str, autonomy.HostAutonomyState] = {}
+        self._power_display_history: dict[str, deque] = {}
+        self._power_display_ema: dict[str, float] = {}
+        self._power_display_status: dict[str, str] = {}
         self._server_order: list[str] = []
         self.internet_down_since: float | None = None
         self.internet_last_outage: float | None = None
@@ -130,6 +145,31 @@ class Monitor:
         if pwr.get("available"):
             state = self._autonomy_state.setdefault(host, autonomy.HostAutonomyState(host=host))
             autonomy.record_sample(state, time.time(), pwr.get("power_now_w"), pwr.get("energy_now_wh"))
+            self._update_power_display(host, pwr.get("power_now_w"), pwr.get("status"))
+
+    def _update_power_display(self, host: str, raw_power_w: float | None, status: str | None) -> None:
+        """Mediana de ventana + EMA, ver comentario junto a POWER_DISPLAY_WINDOW.
+
+        Se resetea el buffer cuando bat_status cambia (Charging <-> Discharging
+        <-> Not charging): un cambio de status es un cambio de regimen real,
+        no ruido -- validado contra datos reales (evento AC_DISCONNECTED del
+        2026-07-30T13:04:57 en samples.csv), donde sin este reset el valor
+        mostrado tardaba ~45-50s en reflejar el cambio real (arrastraba la
+        mediana de la ventana anterior). Sin el reset, la suavizacion mejora
+        el jitter en regimen estable pero empeora la precision justo en el
+        momento mas relevante (conectar/desconectar el cargador)."""
+        if raw_power_w is None:
+            return
+        if self._power_display_status.get(host) != status:
+            self._power_display_history.pop(host, None)
+            self._power_display_ema.pop(host, None)
+            self._power_display_status[host] = status
+        hist = self._power_display_history.setdefault(host, deque(maxlen=POWER_DISPLAY_WINDOW))
+        hist.append(raw_power_w)
+        median = statistics.median(hist)
+        prev_ema = self._power_display_ema.get(host)
+        ema = median if prev_ema is None else prev_ema + POWER_DISPLAY_EMA_ALPHA * (median - prev_ema)
+        self._power_display_ema[host] = ema
 
     def _apply_daily_traffic(self, host: str, snapshot: dict) -> None:
         net = snapshot.get("net", {})
@@ -275,7 +315,24 @@ class Monitor:
                         "origin": "estimated",
                         "model": "power_constante_calibrado_por_divergencia (autonomy.py)",
                     }
+                    # power_now_w pasa a ser el valor suavizado (mediana+EMA,
+                    # ver POWER_DISPLAY_WINDOW) -- es lo que ve el usuario.
+                    # power_now_raw_w conserva la lectura instantanea cruda
+                    # de esta muestra, por si hace falta compararlas. Ambos
+                    # comparten la misma procedencia fisica (measured/derived
+                    # segun parse_battery); el mostrado ademas queda marcado
+                    # "smoothed" en su meta.
+                    raw_power_w = pwr.get("power_now_w")
+                    displayed_power = self._power_display_ema.get(h)
+                    smoothed_power_w = (
+                        round(displayed_power, 2) if displayed_power is not None else raw_power_w
+                    )
+                    if "power_now_w" in power_meta:
+                        power_meta["power_now_raw_w"] = power_meta["power_now_w"]
+                        power_meta["power_now_w"] = {**power_meta["power_now_w"], "smoothed": True}
                     pwr.update({
+                        "power_now_raw_w": raw_power_w,
+                        "power_now_w": smoothed_power_w,
                         "autonomy_seconds": autonomy_result["autonomy_seconds"],
                         "autonomy_mode": autonomy_result["mode"],
                         "age_s": autonomy_result["power_age_s"],

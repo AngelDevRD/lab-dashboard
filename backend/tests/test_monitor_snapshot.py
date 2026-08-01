@@ -123,3 +123,58 @@ def test_snapshot_validated_autonomy_after_complete_discharge():
     assert server["power"]["validated"] is True
     assert server["power"]["complete_discharges"] == 2
     assert server["confidence"]["autonomy"]["score"] > 15
+
+
+def test_power_display_smoothing_with_raw_field():
+    """power_now_w mostrado debe ser el suavizado (mediana+EMA), no la
+    lectura instantanea -- ver Monitor._update_power_display. La lectura
+    cruda queda disponible aparte en power_now_raw_w."""
+    monitor = Monitor()
+    monitor._server_order = [HOST]
+    monitor._autonomy_state[HOST] = HostAutonomyState(host=HOST)
+    readings = [10.0, 16.0, 9.0, 10.5, 9.5]
+    for p in readings:
+        snap = fake_server_snapshot(power={
+            "available": True, "percent": 70, "status": "Discharging", "voltage": 7.8,
+            "energy_now_wh": 19.1, "energy_full_wh": 27.29, "power_now_w": p,
+            "autonomy_seconds": None,
+        })
+        monitor.servers_status[HOST] = snap
+        monitor._record_history(HOST, snap)
+
+    result = monitor.snapshot()
+    power = result["servers"][0]["power"]
+    assert power["power_now_raw_w"] == 9.5  # ultima lectura cruda
+    # El valor mostrado no debe reflejar de lleno el pico espurio de 16.0.
+    assert power["power_now_w"] < 16.0
+    assert power["power_now_w"] != power["power_now_raw_w"]
+
+
+def test_power_display_resets_on_status_change():
+    """Un cambio real de status (Charging -> Discharging) no debe quedar
+    'contaminado' por el promedio del regimen anterior -- validado contra
+    datos reales (evento AC_DISCONNECTED de samples.csv): sin este reset el
+    valor mostrado tardaba ~50s en reflejar el cambio real."""
+    monitor = Monitor()
+    monitor._server_order = [HOST]
+    monitor._autonomy_state[HOST] = HostAutonomyState(host=HOST)
+
+    def push(power_w, status):
+        snap = fake_server_snapshot(power={
+            "available": True, "percent": 70, "status": status, "voltage": 7.8,
+            "energy_now_wh": 19.1, "energy_full_wh": 27.29, "power_now_w": power_w,
+            "autonomy_seconds": None,
+        })
+        monitor.servers_status[HOST] = snap
+        monitor._record_history(HOST, snap)
+
+    for _ in range(15):
+        push(10.0, "Charging")
+    push(2.5, "Discharging")
+
+    result = monitor.snapshot()
+    power = result["servers"][0]["power"]
+    # Sin reset, la mediana de 20 muestras seguiria dominada por los 10.0W
+    # de carga; con reset, la primera muestra del nuevo regimen es la unica
+    # en el buffer y domina el valor mostrado.
+    assert power["power_now_w"] < 5.0
