@@ -12,6 +12,23 @@ from .ssh_client import pool
 
 logger = logging.getLogger("dashboard")
 
+_POWER_ORIGIN_FIELDS = ("power_now_w", "energy_now_wh", "energy_full_wh")
+
+
+def _extract_power_meta(pwr: dict) -> dict:
+    """Arma power.meta (procedencia measured/derived/estimated/unavailable
+    por campo) a partir de los flags que parsers.py::parse_battery ya decidio
+    al parsear. Capa de ensamblado del contrato de la API -- a proposito
+    separada de autonomy.py/confidence.py, que son motores de calculo puros
+    y no deben conocer el formato final que ve el frontend (ver
+    DISEÑO_ARQUITECTURA_DASHBOARD.md)."""
+    meta = {}
+    for field in _POWER_ORIGIN_FIELDS:
+        origin = pwr.pop(f"{field}_origin", None)
+        if origin:
+            meta[field] = {"origin": origin}
+    return meta
+
 
 class Monitor:
     def __init__(self):
@@ -246,20 +263,28 @@ class Monitor:
             state = self._autonomy_state.get(h)
             pwr = s.get("power")
             autonomy_result = None
-            if state and pwr and pwr.get("available"):
-                autonomy_result = autonomy.estimate(
-                    state, pwr.get("status"), pwr.get("energy_now_wh"), pwr.get("energy_full_wh"),
-                    capacity_pct=pwr.get("percent"),
-                )
-                s["power"] = {
-                    **pwr,
-                    "autonomy_seconds": autonomy_result["autonomy_seconds"],
-                    "autonomy_mode": autonomy_result["mode"],
-                    "age_s": autonomy_result["power_age_s"],
-                    "validated": autonomy_result["validated"],
-                    "complete_discharges": autonomy_result["complete_discharges"],
-                    "reliability": autonomy_result["reliability"],
-                }
+            if pwr:
+                pwr = dict(pwr)  # copia local: no mutar el dict compartido en servers_status
+                power_meta = _extract_power_meta(pwr)
+                if state and pwr.get("available"):
+                    autonomy_result = autonomy.estimate(
+                        state, pwr.get("status"), pwr.get("energy_now_wh"), pwr.get("energy_full_wh"),
+                        capacity_pct=pwr.get("percent"),
+                    )
+                    power_meta["autonomy_seconds"] = {
+                        "origin": "estimated",
+                        "model": "power_constante_calibrado_por_divergencia (autonomy.py)",
+                    }
+                    pwr.update({
+                        "autonomy_seconds": autonomy_result["autonomy_seconds"],
+                        "autonomy_mode": autonomy_result["mode"],
+                        "age_s": autonomy_result["power_age_s"],
+                        "validated": autonomy_result["validated"],
+                        "complete_discharges": autonomy_result["complete_discharges"],
+                        "reliability": autonomy_result["reliability"],
+                    })
+                pwr["meta"] = power_meta
+                s["power"] = pwr
             online_hist = self._online_history.get(h, deque())
             online_ratio = (sum(online_hist) / len(online_hist)) if online_hist else None
             s["confidence"] = confidence.for_server(

@@ -253,12 +253,26 @@ def parse_battery(raw: str) -> dict:
     c_full = safe_float(charge_full)
     i_now = safe_float(current_now)
 
+    # Procedencia de cada valor (measured/derived/unavailable), registrada en
+    # el mismo lugar donde ya se decide si hace falta derivar o no -- consumida
+    # por monitor.py para armar power.meta. No cambia ningun calculo existente.
+    energy_now_origin = "measured" if e_now else None
+    energy_full_origin = "measured" if e_full else None
+    power_now_origin = "measured" if p_now else None
+
     if not e_now and voltage_uv and c_now:
         e_now = c_now * voltage_uv / 1_000_000
+        energy_now_origin = "derived"
     if not e_full and voltage_uv and c_full:
         e_full = c_full * voltage_uv / 1_000_000
+        energy_full_origin = "derived"
     if not p_now and voltage_uv and i_now:
         p_now = i_now * voltage_uv / 1_000_000
+        power_now_origin = "derived"
+
+    energy_now_origin = energy_now_origin or ("unavailable" if not e_now else "measured")
+    energy_full_origin = energy_full_origin or ("unavailable" if not e_full else "measured")
+    power_now_origin = power_now_origin or ("unavailable" if not p_now else "measured")
 
     autonomy = None
     if status == "Discharging":
@@ -281,6 +295,9 @@ def parse_battery(raw: str) -> dict:
         "energy_full_wh": round(e_full / 1_000_000, 2) if e_full else None,
         "power_now_w": round(p_now / 1_000_000, 2) if p_now else None,
         "autonomy_seconds": round(autonomy) if autonomy else None,
+        "energy_now_wh_origin": energy_now_origin,
+        "energy_full_wh_origin": energy_full_origin,
+        "power_now_w_origin": power_now_origin,
     }
 
 
