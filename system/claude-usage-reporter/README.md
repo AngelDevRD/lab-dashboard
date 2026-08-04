@@ -22,7 +22,7 @@ que es quien calcula y empuja el reporte.
    notepad config.json
    ```
 
-   - `server_url`: URL del backend (`http://192.168.100.7:8600` por defecto).
+   - `server_url`: URL del backend (`http://192.168.100.8:8600` por defecto).
    - `token`: debe coincidir exactamente con `CLAUDE_USAGE_REPORT_TOKEN` en el
      `.env` del backend en `angel1`. Generar uno nuevo si no existe:
 

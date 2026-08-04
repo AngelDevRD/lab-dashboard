@@ -1,5 +1,5 @@
 {
-  "server_url": "http://192.168.100.7:8600",
+  "server_url": "http://192.168.100.8:8600",
   "token": "REEMPLAZAR_CON_EL_MISMO_VALOR_DE_CLAUDE_USAGE_REPORT_TOKEN_EN_EL_.env_DEL_SERVIDOR",
   "source": "pc-angel",
   "ccusage_package": "ccusage@20.0.18",
