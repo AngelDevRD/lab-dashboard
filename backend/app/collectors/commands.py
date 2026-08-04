@@ -61,8 +61,8 @@ SLOW_COMMAND_TTLS = {
 }
 
 INTERNET_COMMANDS = {
-    "ping_google": "ping -c 1 -W 2 8.8.8.8 2>/dev/null | tail -1",
-    "ping_cloudflare": "ping -c 1 -W 2 1.1.1.1 2>/dev/null | tail -1",
+    "ping_google": "ping -c 1 -W 2 8.8.8.8 2>/dev/null | grep 'time='",
+    "ping_cloudflare": "ping -c 1 -W 2 1.1.1.1 2>/dev/null | grep 'time='",
 }
 
 # "Información avanzada" del panel de detalles — solo se ejecutan bajo demanda
