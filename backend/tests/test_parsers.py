@@ -234,8 +234,16 @@ class TestParseDocker:
         assert result["available"] is True
         assert len(result["containers"]) == 0
 
+    def test_zero_containers_still_available(self):
+        # docker instalado y corriendo pero sin contenedores desplegados:
+        # el marcador __DOCKER_OK__ es lo unico que distingue esto de "sin docker".
+        result = parse_docker("__DOCKER_OK__")
+        assert result["available"] is True
+        assert result["running"] == 0
+        assert result["containers"] == []
+
     def test_valid_containers(self):
-        raw = "web|running|Up 2h\ndb|exited|Exited 0"
+        raw = "web|running|Up 2h\ndb|exited|Exited 0\n__DOCKER_OK__"
         result = parse_docker(raw)
         assert result["available"] is True
         assert result["running"] == 1

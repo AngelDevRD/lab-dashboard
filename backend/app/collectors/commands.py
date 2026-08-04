@@ -13,7 +13,8 @@ COMMANDS = {
     "net_ip": "hostname -I 2>/dev/null | awk '{print $1}'",
     "net_io": "cat /proc/net/dev",
     "docker": (
-        "docker ps -a --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null || echo '__NO_DOCKER__'"
+        "docker ps -a --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null "
+        "&& echo '__DOCKER_OK__' || echo '__NO_DOCKER__'"
     ),
     "docker_disk": (
         "docker system df --format '{{.Type}}|{{.Size}}' 2>/dev/null || echo '__NO_DOCKER__'"

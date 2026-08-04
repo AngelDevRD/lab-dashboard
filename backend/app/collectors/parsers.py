@@ -176,9 +176,12 @@ def parse_docker(raw: str) -> dict:
     raw = raw.strip()
     if not raw or raw == "__NO_DOCKER__":
         return {"available": False, "running": 0, "stopped": 0, "containers": []}
+    lines = raw.splitlines()
+    if lines and lines[-1] == "__DOCKER_OK__":
+        lines = lines[:-1]
     containers = []
     running = stopped = 0
-    for line in raw.splitlines():
+    for line in lines:
         parts = line.split("|")
         if len(parts) != 3:
             continue
