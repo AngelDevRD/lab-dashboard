@@ -69,6 +69,7 @@ def no_real_notifications(monkeypatch):
 
     monkeypatch.setattr("app.alerts.service.notify_alert", noop)
     monkeypatch.setattr("app.alerts.service.notify_recovery", noop)
+    monkeypatch.setattr("app.alerts.service.play_battery_alarm", noop)
 
 
 @pytest.mark.asyncio
@@ -173,6 +174,46 @@ class TestHysteresisAndDedup:
         assert svc2.get_active_alerts_count() == 1, "el estado activo debe restaurarse al reiniciar"
         second = svc2.process_server(offline)
         assert second == [], "no debe re-crear ni re-notificar una alerta que ya estaba activa"
+
+
+@pytest.mark.asyncio
+class TestSoundAlarm:
+    """La alarma sonora (sound_alarm.play_battery_alarm) debe sonar en el
+    propio servidor cuando se activa una alerta de bateria real, y solo
+    para esa categoria -- no para cpu/mem/disco/etc."""
+
+    async def test_battery_alert_triggers_sound_alarm(self, monkeypatch):
+        calls: list[str] = []
+
+        async def spy(host):
+            calls.append(host)
+
+        monkeypatch.setattr("app.alerts.service.play_battery_alarm", spy)
+        monkeypatch.setattr(
+            "app.alerts.service.threshold_manager._settings",
+            ThresholdSettings(hysteresis_cycles=1, battery_critical=20, battery_emergency=10),
+        )
+        svc = NotificationService()
+        server = make_server(power={"available": True, "percent": 15, "status": "Discharging"})
+        svc.process_server(server)
+        await asyncio.sleep(0)  # deja correr la corrutina disparada via ensure_future
+        assert calls == ["10.0.0.1"]
+
+    async def test_cpu_alert_does_not_trigger_sound_alarm(self, monkeypatch):
+        calls: list[str] = []
+
+        async def spy(host):
+            calls.append(host)
+
+        monkeypatch.setattr("app.alerts.service.play_battery_alarm", spy)
+        monkeypatch.setattr(
+            "app.alerts.service.threshold_manager._settings",
+            ThresholdSettings(hysteresis_cycles=1, cpu_warning=50, cpu_critical=90),
+        )
+        svc = NotificationService()
+        server = make_server(cpu={"percent": 95, "cores": 4})
+        svc.process_server(server)
+        assert calls == []
 
 
 @pytest.mark.asyncio

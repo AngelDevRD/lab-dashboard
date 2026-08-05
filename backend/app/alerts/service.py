@@ -10,6 +10,7 @@ from .models import Alert, AlertStatus
 from .center import alert_center
 from .engine import evaluate_server
 from .notifier import notify_alert, notify_recovery
+from .sound_alarm import play_battery_alarm
 from .thresholds import threshold_manager
 
 logger = logging.getLogger("dashboard")
@@ -167,6 +168,8 @@ class NotificationService:
         self._save_state()
         if alert.severity.value in NOTIFIABLE_SEVERITIES:
             self._fire(notify_alert(alert), "notificación", alert.title)
+            if alert.category == "power":
+                self._fire(play_battery_alarm(host), "alarma sonora", alert.title)
         return alert
 
     def _maybe_retry(self, alert_id: str, existing: Alert) -> None:
@@ -181,6 +184,8 @@ class NotificationService:
             self._send_count[alert_id] = count + 1
             self._save_state()
             self._fire(notify_alert(existing), "reintento", existing.title)
+            if existing.category == "power":
+                self._fire(play_battery_alarm(existing.server_host), "alarma sonora", existing.title)
             logger.info(
                 "Re-enviando alerta %s (%d/%d)", alert_id, count + 1, retry["max_sends"],
             )
