@@ -185,7 +185,7 @@ class TestSoundAlarm:
     async def test_battery_alert_triggers_sound_alarm(self, monkeypatch):
         calls: list[str] = []
 
-        async def spy(host):
+        async def spy(host, percent=None):
             calls.append(host)
 
         monkeypatch.setattr("app.alerts.service.play_battery_alarm", spy)
@@ -202,7 +202,7 @@ class TestSoundAlarm:
     async def test_cpu_alert_does_not_trigger_sound_alarm(self, monkeypatch):
         calls: list[str] = []
 
-        async def spy(host):
+        async def spy(host, percent=None):
             calls.append(host)
 
         monkeypatch.setattr("app.alerts.service.play_battery_alarm", spy)

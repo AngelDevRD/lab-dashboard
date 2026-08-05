@@ -169,7 +169,7 @@ class NotificationService:
         if alert.severity.value in NOTIFIABLE_SEVERITIES:
             self._fire(notify_alert(alert), "notificación", alert.title)
             if alert.category == "power":
-                self._fire(play_battery_alarm(host), "alarma sonora", alert.title)
+                self._fire(play_battery_alarm(host, alert.current_value), "alarma sonora", alert.title)
         return alert
 
     def _maybe_retry(self, alert_id: str, existing: Alert) -> None:
@@ -185,7 +185,10 @@ class NotificationService:
             self._save_state()
             self._fire(notify_alert(existing), "reintento", existing.title)
             if existing.category == "power":
-                self._fire(play_battery_alarm(existing.server_host), "alarma sonora", existing.title)
+                self._fire(
+                    play_battery_alarm(existing.server_host, existing.current_value),
+                    "alarma sonora", existing.title,
+                )
             logger.info(
                 "Re-enviando alerta %s (%d/%d)", alert_id, count + 1, retry["max_sends"],
             )
