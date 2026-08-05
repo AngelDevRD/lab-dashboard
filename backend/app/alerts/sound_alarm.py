@@ -34,9 +34,12 @@ from ..ssh_client import pool
 logger = logging.getLogger("dashboard")
 
 _VOLUME_CONTROLS = ("Master", "Speaker", "DAC", "PCM")
-_UNMUTE = "; ".join(f'amixer sset "{c}" 90% unmute >/dev/null 2>&1' for c in _VOLUME_CONTROLS)
+# sudo: evita depender de que el usuario SSH este en el grupo "audio" en
+# cada equipo (confirmado que angel0 en .7 no lo estaba) -- root siempre
+# puede tocar los nodos de /dev/snd sin importar la config de grupos local.
+_UNMUTE = "; ".join(f'sudo -n amixer sset "{c}" 100% unmute >/dev/null 2>&1' for c in _VOLUME_CONTROLS)
 AUDIO_PATH = "/opt/lab-dashboard-alarm/battery-alarm.mp4"
-PLAY_CMD = f"timeout 15 ffplay -nodisp -autoexit -loglevel quiet {AUDIO_PATH} >/dev/null 2>&1"
+PLAY_CMD = f"timeout 15 sudo -n ffplay -nodisp -autoexit -loglevel quiet {AUDIO_PATH} >/dev/null 2>&1"
 
 _MIN_REPEATS = 1
 _MAX_REPEATS = 4
