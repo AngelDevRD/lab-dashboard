@@ -230,6 +230,19 @@ def power_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, Non
     pct = power.get("percent")
     if pct is None:
         return
+    # Bateria fisicamente presente pero danada/desconectada: el firmware
+    # reporta 0% fijo para siempre (nunca sube, nunca cambia de estado) sin
+    # ningun sensor de potencia detras -- eso no es una emergencia real, es
+    # hardware que no funciona. Sin este chequeo, un equipo asi dispara la
+    # alerta de "bateria en emergencia" en cada ciclo, para siempre.
+    status_lower = (power.get("status") or "").lower()
+    battery_damaged = (
+        pct == 0
+        and power.get("power_now_w") is None
+        and status_lower in ("not charging", "unknown")
+    )
+    if battery_damaged:
+        return
     if pct <= settings.battery_emergency:
         yield {
             "severity": Severity.CRITICAL,

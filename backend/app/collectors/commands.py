@@ -34,6 +34,18 @@ COMMANDS = {
     "top_mem": "ps -eo pid,comm,%mem --sort=-%mem --no-headers | head -5",
     "hostname": "hostname",
     "network_status": "cat /etc/network-guardian/status.json 2>/dev/null || echo '{}'",
+    # Fallback de consumo (W) para equipos sin bateria funcional: en Intel,
+    # RAPL (powercap) da la energia real del paquete de CPU -- dos lecturas
+    # separadas 1s dan watts promedio de esa ventana. Requiere root (el
+    # archivo es -r-------), por eso sudo -n (ya hay NOPASSWD ALL en los 4
+    # servidores). En AMD no existe RAPL asi -- ver "cpu_temp" (sensors -j),
+    # que ya trae fam15h_power / power1_average para esos casos.
+    "cpu_power_rapl": (
+        "R=/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj; "
+        "if sudo -n test -r \"$R\" 2>/dev/null; then "
+        "A=$(sudo -n cat \"$R\"); sleep 1; B=$(sudo -n cat \"$R\"); echo \"$A $B\"; "
+        "fi"
+    ),
 }
 
 # Reloj remoto: habilita el check "tiempo sincronizado" del Health Score de
@@ -59,6 +71,10 @@ SLOW_COMMAND_TTLS = {
     "updates": 1800,
     "docker_disk": 300,
     "disk_temp": 600,
+    # Tiene un sleep 1 interno -- correrlo cada ciclo (POLL_INTERVAL=3s por
+    # defecto) agregaria ~1s de latencia constante a cada poll de estos
+    # hosts. Un consumo de CPU/paquete no necesita refrescarse tan seguido.
+    "cpu_power_rapl": 15,
 }
 
 INTERNET_COMMANDS = {

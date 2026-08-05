@@ -95,6 +95,16 @@
     return h > 0 && m > 0 ? `${h} h ${m} min` : h > 0 ? `${h} h` : `${m} min`;
   }
 
+  // A pocos vatios de consumo, el total acumulado tarda dias en pasar de
+  // 0.01 kWh -- con 2 decimales fijos se veria "0.00" indefinidamente aunque
+  // si este sumando. Mas decimales para valores chicos evita que parezca
+  // roto/estancado.
+  function formatKwh(kwh) {
+    if (kwh == null) return "Sin datos";
+    if (kwh < 0.01) return `${kwh.toFixed(4)} kWh`;
+    return `${kwh.toFixed(2)} kWh`;
+  }
+
   function applyAuto(el, txt) {
     if (el.textContent === txt) return;
     el.textContent = txt;
@@ -109,8 +119,9 @@
     const status = power.status;
 
     let special = null;
-    if (!power.available) special = "--";
+    if (!power.available) special = "Sin bat.";
     else if (status === "Full" || status === "Not charging") special = "En AC";
+    else if (status === "Charging" && (sec == null || sec <= 0)) special = "Cargando";
     else if (sec == null || sec <= 0) special = "N/A";
 
     const st = autoState.get(host);
@@ -151,19 +162,6 @@
     }
   }
 
-  // Badge chico de confianza (ver AUDITORIA_PRECISION.md): solo se muestra
-  // cuando el score es bajo (<50%), para no ensuciar la tarjeta cuando el
-  // dato es confiable — ahí no aporta nada verlo.
-  function setConfBadge(el, entry) {
-    if (!el) return;
-    if (!entry || entry.score >= 50) {
-      el.classList.add("hidden");
-      return;
-    }
-    el.textContent = `${entry.score}%`;
-    el.title = entry.note ? `${entry.source} — ${entry.note}` : entry.source;
-    el.classList.remove("hidden");
-  }
 
   function statusLevel(s) {
     if (!s.online) return "red";
@@ -194,8 +192,7 @@
         temp: el.querySelector(".cpu-temp"),
         power: el.querySelector(".power-value"),
         powerWatts: el.querySelector(".power-watts"),
-        powerConf: el.querySelector(".power-conf"),
-        autonomyConf: el.querySelector(".autonomy-conf"),
+        energyKwh: el.querySelector(".energy-kwh"),
         docker: el.querySelector(".docker-summary"),
         hdrDocker: el.querySelector(".hdr-docker"),
         hdrBattery: el.querySelector(".hdr-battery"),
@@ -252,14 +249,13 @@
       setText(refs, "temp", "--");
       setText(refs, "power", "--");
       setText(refs, "powerWatts", "--");
+      setText(refs, "energyKwh", "--");
       setText(refs, "docker", "--");
       setText(refs, "uptime", "Offline");
       setText(refs, "latency", "");
       setText(refs, "wifiNetwork", "--");
       setText(refs, "wifiPing", "");
       setText(refs, "autonomy", "--");
-      refs.el.powerConf.classList.add("hidden");
-      refs.el.autonomyConf.classList.add("hidden");
       setBadge(refs, "hdrDocker", false);
       setBadge(refs, "hdrBattery", false);
       autoState.delete(s.host);
@@ -295,23 +291,34 @@
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
     const power = s.power || {};
-    if (power.available) {
+    const statusLower = (power.status || "").toLowerCase();
+    const noSensorData = power.percent === 0 && power.power_now_w == null
+      && (statusLower === "not charging" || statusLower === "unknown");
+    if (power.available && !noSensorData) {
       const pct = power.percent ?? 0;
-      const charging = (power.status || "").toLowerCase() === "charging";
+      const charging = statusLower === "charging";
       const level = pct <= 20 ? "bat-critical" : pct <= 30 ? "bat-warning" : "";
       const iconClasses = ["bat-icon", charging ? "bat-charging" : "", level].filter(Boolean).join(" ");
       const icon = `<span class="${iconClasses}" style="--bat-lvl:${pct}%"></span>`;
       setHTML(refs, "power",
         `${icon}<span class="bat-pct ${level}">${pct}</span>`
       );
+    } else if (power.available && noSensorData) {
+      setText(refs, "power", "Dañada");
     } else {
-      setText(refs, "power", "--");
+      setText(refs, "power", "Sin bat.");
     }
-    setText(refs, "powerWatts", power.available && power.power_now_w != null ? `${power.power_now_w.toFixed(1)}W` : "--");
+    if (power.available && power.power_now_w != null) {
+      setText(refs, "powerWatts", `${power.power_now_w.toFixed(1)}W`);
+    } else if (power.cpu_power_w != null) {
+      // Sin bateria funcional: consumo del paquete de CPU como aproximacion
+      // (no es el equipo completo, pero es mejor que no mostrar nada).
+      setText(refs, "powerWatts", `~${power.cpu_power_w.toFixed(1)}W`);
+    } else {
+      setText(refs, "powerWatts", "Sin bat.");
+    }
+    setText(refs, "energyKwh", formatKwh(power.energy_kwh_total));
     setBadge(refs, "hdrBattery", power.available && (power.status || "").toLowerCase() === "discharging");
-    const conf = s.confidence || {};
-    setConfBadge(refs.el.powerConf, conf.power);
-    setConfBadge(refs.el.autonomyConf, conf.autonomy);
 
     const docker = s.docker || {};
     setText(refs, "docker", docker.available ? `${docker.running}/${docker.running + docker.stopped}` : "--");

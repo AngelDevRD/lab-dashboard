@@ -20,7 +20,7 @@
     </div>
     <div class="topbar-right">
       <button id="nav-metrics-btn" class="nav-btn" title="Ver métricas de Claude Code">📊 Métricas</button>
-      <button id="nav-framework-btn" class="nav-btn" title="Ver telemetría de proyectos IA">🧠 Proyectos IA</button>
+      <button id="nav-framework-btn" class="nav-btn" title="Ver telemetría de proyectos IA">🧠 Tokens IA</button>
       <span id="clock" class="clock">--:--:--</span>
       <div class="alert-bell-wrap">
         <button id="alert-bell" class="icon-btn" title="Alertas">🔔<span id="alert-badge" class="alert-badge hidden">0</span></button>
@@ -219,11 +219,14 @@
         <div class="mini">
           <span class="mini-label" title="Consumo actual"><svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg></span>
           <span class="mini-value power-watts">--</span>
-          <span class="conf-badge power-conf hidden" title=""></span>
         </div>
         <div class="mini">
           <span class="mini-label" title="Batería"><svg class="icon-svg" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg></span>
           <span class="mini-value power-value">--</span>
+        </div>
+        <div class="mini">
+          <span class="mini-label" title="Consumo acumulado (kWh)"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 1.5"></path><path d="M9 2h6"></path><path d="M18.5 5.5 20 4"></path></svg></span>
+          <span class="mini-value energy-kwh">--</span>
         </div>
         <div class="mini">
           <span class="mini-label" title="Docker"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>
@@ -236,7 +239,6 @@
         <div class="mini">
           <span class="mini-label" title="Autonomía"><svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2"></path></svg></span>
           <span class="mini-value autonomy-value">--</span>
-          <span class="conf-badge autonomy-conf hidden" title=""></span>
         </div>
       </div>
 

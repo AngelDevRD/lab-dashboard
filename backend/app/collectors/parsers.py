@@ -72,12 +72,25 @@ def parse_cpu_temp(raw: str) -> dict:
     """
     raw = raw.strip()
     if not raw:
-        return {"value": None, "per_core": []}
+        return {"value": None, "per_core": [], "amd_package_power_w": None}
     try:
         data = json.loads(raw)
         per_core: list[float] = []
         package_temp: float | None = None
-        for chip in data.values():
+        k10temp_value: float | None = None
+        # fam15h_power/power1_average: consumo real del paquete AMD (W), no
+        # temperatura -- viaja en el mismo "sensors -j" que ya se pide para
+        # la temperatura, asi que se aprovecha sin otro round-trip SSH. Sirve
+        # como fallback de vatios en equipos AMD sin bateria funcional.
+        amd_package_power_w: float | None = None
+        for chip_name, chip in data.items():
+            if re.match(r"fam15h_power", chip_name, re.IGNORECASE):
+                for sensor in chip.values():
+                    if isinstance(sensor, dict) and "power1_average" in sensor:
+                        try:
+                            amd_package_power_w = round(float(sensor["power1_average"]), 2)
+                        except (TypeError, ValueError):
+                            pass
             for label, sensor in chip.items():
                 if not isinstance(sensor, dict):
                     continue
@@ -88,19 +101,44 @@ def parse_cpu_temp(raw: str) -> dict:
                         package_temp = round(float(v), 1)
                     elif re.search(r"core\s*\d+", label, re.IGNORECASE):
                         per_core.append(round(float(v), 1))
+                    # AMD (driver k10temp): sin etiquetas "Package"/"Core N"
+                    # como Intel -- el chip reporta un solo "temp1" generico.
+                    # Se identifica por el nombre del chip, no del sensor, y
+                    # solo se usa como ultimo fallback para no pisar coretemp.
+                    elif k10temp_value is None and re.match(r"k10temp", chip_name, re.IGNORECASE):
+                        k10temp_value = round(float(v), 1)
         if package_temp is not None or per_core:
             value = (
                 package_temp if package_temp is not None
                 else round(sum(per_core) / len(per_core), 1)
             )
-            return {"value": value, "per_core": per_core}
+            return {"value": value, "per_core": per_core, "amd_package_power_w": amd_package_power_w}
+        if k10temp_value is not None:
+            return {"value": k10temp_value, "per_core": [], "amd_package_power_w": amd_package_power_w}
     except (json.JSONDecodeError, AttributeError):
         pass
     nums = [int(x) for x in raw.splitlines() if x.strip().isdigit()]
     if nums:
         temps = [round(n / 1000, 1) for n in nums]
-        return {"value": temps[0], "per_core": temps}
-    return {"value": None, "per_core": []}
+        return {"value": temps[0], "per_core": temps, "amd_package_power_w": None}
+    return {"value": None, "per_core": [], "amd_package_power_w": None}
+
+
+def parse_cpu_power_rapl(raw: str) -> float | None:
+    """Dos lecturas de energy_uj (RAPL, dominio package-0) separadas ~1s ->
+    watts promedio de esa ventana. Ver comando "cpu_power_rapl" en
+    commands.py -- vacio si el host no es Intel o RAPL no esta accesible."""
+    parts = raw.strip().split()
+    if len(parts) != 2:
+        return None
+    try:
+        a, b = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    delta_uj = b - a
+    if delta_uj < 0:  # el contador de RAPL da la vuelta (wraparound)
+        return None
+    return round(delta_uj / 1_000_000, 2)
 
 
 def parse_mem(raw: str) -> dict:

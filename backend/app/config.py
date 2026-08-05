@@ -55,6 +55,14 @@ CLAUDE_USAGE_REPORT_FILE = Path(
 )
 CLAUDE_USAGE_STALE_SEC = float(os.getenv("CLAUDE_USAGE_STALE_SEC", str(24 * 3600)))
 
+# Consumo acumulado (kWh) por servidor: integra power_now_w en el tiempo.
+# Persistido para sobrevivir reinicios del backend (si no, el contador
+# volveria a 0 cada vez que se reinicia el contenedor).
+ENERGY_KWH_FILE = Path(
+    os.getenv("ENERGY_KWH_FILE", str(BASE_DIR / "data" / "energy_kwh.json"))
+)
+ENERGY_KWH_SAVE_INTERVAL_S = float(os.getenv("ENERGY_KWH_SAVE_INTERVAL_S", "60"))
+
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(

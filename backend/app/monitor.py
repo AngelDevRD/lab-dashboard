@@ -7,7 +7,7 @@ from datetime import date
 
 from . import config, events
 from .alerts.service import notification_service
-from .collectors import autonomy, confidence
+from .collectors import autonomy, confidence, energy
 from .collectors.collector import collect_internet, collect_server
 from .ssh_client import pool
 
@@ -146,6 +146,14 @@ class Monitor:
             state = self._autonomy_state.setdefault(host, autonomy.HostAutonomyState(host=host))
             autonomy.record_sample(state, time.time(), pwr.get("power_now_w"), pwr.get("energy_now_wh"))
             self._update_power_display(host, pwr.get("power_now_w"), pwr.get("status"))
+        # kWh acumulado: preferir el vatiaje real de bateria: si no hay
+        # (equipo sin bateria o bateria danada, ver parsers.parse_cpu_power_rapl
+        # / amd_package_power_w), usar el consumo de CPU/paquete como
+        # aproximacion -- mejor eso que no medir nada en esos equipos.
+        power_for_energy = pwr.get("power_now_w")
+        if power_for_energy is None:
+            power_for_energy = pwr.get("cpu_power_w")
+        energy.record(host, power_for_energy)
 
     def _update_power_display(self, host: str, raw_power_w: float | None, status: str | None) -> None:
         """Mediana de ventana + EMA, ver comentario junto a POWER_DISPLAY_WINDOW.
@@ -340,6 +348,7 @@ class Monitor:
                         "complete_discharges": autonomy_result["complete_discharges"],
                         "reliability": autonomy_result["reliability"],
                     })
+                pwr["energy_kwh_total"] = energy.get_kwh(h)
                 pwr["meta"] = power_meta
                 s["power"] = pwr
             online_hist = self._online_history.get(h, deque())

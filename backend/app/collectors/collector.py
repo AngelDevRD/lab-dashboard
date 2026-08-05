@@ -83,6 +83,14 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         return results.get(key, (False, ""))[1]
 
     cpu_temp = parsers.parse_cpu_temp(out("cpu_temp"))
+    rapl_power_w = parsers.parse_cpu_power_rapl(out("cpu_power_rapl"))
+    # Fallback de vatios cuando no hay bateria funcional para medirlos:
+    # Intel (RAPL) primero, AMD (fam15h_power, ya viene en cpu_temp) despues.
+    # No reemplaza power_now_w real de bateria -- monitor.py decide cuando
+    # usar cada uno.
+    cpu_power_fallback_w = rapl_power_w if rapl_power_w is not None else cpu_temp.get("amd_package_power_w")
+    power = parsers.parse_battery(out("battery"), host)
+    power["cpu_power_w"] = cpu_power_fallback_w
     snapshot = {
         "name": server.get("name", host),
         "host": host,
@@ -106,7 +114,7 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         "docker_disk": parsers.parse_docker_disk(out("docker_disk")),
         "updates_pending": parsers.parse_updates(out("updates")),
         "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
-        "power": parsers.parse_battery(out("battery"), host),
+        "power": power,
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
         "clock_offset_s": clock_offset_s,
         "top_cpu": parsers.parse_top_procs(out("top_cpu")),

@@ -3,6 +3,7 @@
 from app.collectors.parsers import (
     parse_uptime,
     parse_cpu_temp,
+    parse_cpu_power_rapl,
     parse_top_procs,
     parse_battery,
     parse_updates,
@@ -38,10 +39,10 @@ class TestParseUptime:
 
 class TestParseCpuTemp:
     def test_empty(self):
-        assert parse_cpu_temp("") == {"value": None, "per_core": []}
+        assert parse_cpu_temp("") == {"value": None, "per_core": [], "amd_package_power_w": None}
 
     def test_malformed_json(self):
-        assert parse_cpu_temp("{bad") == {"value": None, "per_core": []}
+        assert parse_cpu_temp("{bad") == {"value": None, "per_core": [], "amd_package_power_w": None}
 
     def test_plain_numbers(self):
         raw = "55000\n62000\n"
@@ -87,7 +88,39 @@ class TestParseCpuTemp:
 
     def test_no_coretemp_falls_back_to_none(self):
         raw = '{"BAT0-acpi-0": {"Adapter": "ACPI interface", "in0": {"in0_input": 7.7}}}'
-        assert parse_cpu_temp(raw) == {"value": None, "per_core": []}
+        assert parse_cpu_temp(raw) == {"value": None, "per_core": [], "amd_package_power_w": None}
+
+    def test_amd_k10temp_label(self):
+        """AMD (driver k10temp) no tiene etiquetas 'Package'/'Core N' como
+        Intel -- un solo 'temp1' generico, identificado por el nombre del
+        chip. Ver auditoria .6."""
+        raw = '{"k10temp-pci-00c3": {"Adapter": "PCI adapter", "temp1": {"temp1_input": 46.6}}}'
+        result = parse_cpu_temp(raw)
+        assert result["value"] == 46.6
+        assert result["per_core"] == []
+
+    def test_amd_package_power_extracted(self):
+        raw = """
+        {"fam15h_power-pci-00c4": {"Adapter": "PCI adapter", "power1": {"power1_average": 7.27}},
+         "k10temp-pci-00c3": {"Adapter": "PCI adapter", "temp1": {"temp1_input": 46.6}}}
+        """
+        result = parse_cpu_temp(raw)
+        assert result["amd_package_power_w"] == 7.27
+
+
+class TestParseCpuPowerRapl:
+    def test_empty_no_rapl(self):
+        assert parse_cpu_power_rapl("") is None
+
+    def test_computes_watts_from_two_samples(self):
+        # 1_000_000 uJ de delta en ~1s == 1W
+        assert parse_cpu_power_rapl("1000000 2000000") == 1.0
+
+    def test_counter_wraparound_returns_none(self):
+        assert parse_cpu_power_rapl("2000000 1000000") is None
+
+    def test_malformed_returns_none(self):
+        assert parse_cpu_power_rapl("not a number") is None
 
 
 class TestParseTopProcs:
