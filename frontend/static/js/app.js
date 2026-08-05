@@ -95,13 +95,8 @@
     return h > 0 && m > 0 ? `${h} h ${m} min` : h > 0 ? `${h} h` : `${m} min`;
   }
 
-  // A pocos vatios de consumo, el total acumulado tarda dias en pasar de
-  // 0.01 kWh -- con 2 decimales fijos se veria "0.00" indefinidamente aunque
-  // si este sumando. Mas decimales para valores chicos evita que parezca
-  // roto/estancado.
   function formatKwh(kwh) {
     if (kwh == null) return "Sin datos";
-    if (kwh < 0.01) return `${kwh.toFixed(4)} kWh`;
     return `${kwh.toFixed(2)} kWh`;
   }
 
@@ -310,7 +305,7 @@
     }
     if (power.available && power.power_now_w != null) {
       setText(refs, "powerWatts", `${power.power_now_w.toFixed(1)}W`);
-    } else if (power.cpu_power_w != null) {
+    } else if (power.cpu_power_w != null && power.cpu_power_w >= 0) {
       // Sin bateria funcional: consumo del paquete de CPU como aproximacion
       // (no es el equipo completo, pero es mejor que no mostrar nada).
       setText(refs, "powerWatts", `~${power.cpu_power_w.toFixed(1)}W`);

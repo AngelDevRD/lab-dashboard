@@ -107,6 +107,15 @@ class TestParseCpuTemp:
         result = parse_cpu_temp(raw)
         assert result["amd_package_power_w"] == 7.27
 
+    def test_amd_package_power_negative_treated_as_invalid(self):
+        """El sensor a veces da un valor negativo espurio en reposo -- no
+        existe consumo negativo, se descarta en vez de mostrarse."""
+        raw = """
+        {"fam15h_power-pci-00c4": {"Adapter": "PCI adapter", "power1": {"power1_average": -0.5}}}
+        """
+        result = parse_cpu_temp(raw)
+        assert result["amd_package_power_w"] is None
+
 
 class TestParseCpuPowerRapl:
     def test_empty_no_rapl(self):

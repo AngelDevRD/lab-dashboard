@@ -88,7 +88,12 @@ def parse_cpu_temp(raw: str) -> dict:
                 for sensor in chip.values():
                     if isinstance(sensor, dict) and "power1_average" in sensor:
                         try:
-                            amd_package_power_w = round(float(sensor["power1_average"]), 2)
+                            watts = round(float(sensor["power1_average"]), 2)
+                            # El sensor a veces reporta un valor negativo
+                            # espurio en una lectura suelta (ruido del chip
+                            # en reposo) -- fisicamente no existe consumo
+                            # negativo, tratarlo como lectura invalida.
+                            amd_package_power_w = watts if watts >= 0 else None
                         except (TypeError, ValueError):
                             pass
             for label, sensor in chip.items():
