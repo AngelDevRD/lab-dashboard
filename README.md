@@ -30,54 +30,68 @@ system/
   nginx.conf
 ```
 
-## Auto-deploy (push-based, vía GitHub Actions)
+## Auto-deploy
 
-Cada `git push` a `main` que toque `backend/`, `frontend/`, `system/` o el propio
-workflow dispara `.github/workflows/deploy.yml` (un push que solo cambia el README no
-despliega nada). El runner se une a la tailnet (`tailscale/github-action`), carga una
-deploy key dedicada y ejecuta un **despliegue seguro** por SSH:
+**El mecanismo que despliega de verdad es el timer de systemd en el servidor**, no
+GitHub Actions. Cada 2 minutos, `lab-dashboard-update.timer` corre
+`system/update-docker.sh` como el usuario `angel1`:
 
-1. `git fetch origin main` + `git checkout main` + `git pull --ff-only` (nunca reescribe
-   historia local con `reset --hard`, si el fast-forward falla el deploy se detiene).
-2. Si cambió `backend/requirements.txt`, reinstala dependencias.
-3. Si existe `backend/tests/`, corre `pytest` antes de reiniciar nada.
-4. `systemctl restart lab-dashboard.service`.
-5. Health-check: reintenta `GET /api/health` hasta 20s.
-6. **Si cualquiera de los pasos 2-5 falla**, rollback automático: `git reset --hard`
-   al commit anterior, reinstala dependencias de esa versión si hace falta, reinicia
-   el servicio y vuelve a verificar `/api/health`. La tablet nunca se queda mostrando
-   una versión rota — sigue corriendo la última que sí pasó el health-check.
-7. El job de Actions se marca como **Failed** de todos modos si hubo que hacer
-   rollback (para que te enteres), con las últimas 100 líneas de
-   `journalctl -u lab-dashboard.service` y el resultado del rollback en los logs.
+1. Aborta si el árbol de trabajo está sucio o si el repo no está en `main` — nunca
+   pisa trabajo en curso, y nunca usa `reset --hard`.
+2. `git fetch` + fast-forward a `origin/main` (si hay divergencia, merge automático).
+3. Si `HEAD` ya es igual a `.last-built-commit`, sale sin hacer nada: el ciclo en
+   vacío es de ~1s y solo construye cuando hay commits nuevos.
+4. `docker compose build` + `up -d`.
+5. Health-check con reintentos contra `GET /api/health`.
+6. **Si el build, el contenedor o el health-check fallan**, rollback automático al
+   commit anterior, rebuild y redeploy. La tablet nunca se queda con una versión
+   rota: sigue corriendo la última que pasó el health-check.
 
-Al terminar, el job escribe un resumen en la pestaña *Summary* del run con: commit
-desplegado, fecha/hora, estado (éxito/error), downtime estimado (segundos entre el
-restart y el primer health-check exitoso), resultado del rollback si aplicó, y la URL
-del dashboard.
+Un push que solo cambia el README también se despliega — el timer mira commits, no
+rutas.
 
-**Usuario dedicado**: todo el proceso (dueño de `/opt/lab-dashboard`, proceso del
-servicio, y la cuenta que usa GitHub Actions por SSH) corre bajo `dashboard-deploy`,
-un usuario de sistema sin privilegios — nunca root ni tu usuario personal. Su único
-permiso sudo es reiniciar `lab-dashboard.service`, nada más (`/etc/sudoers.d/lab-dashboard`).
+### Estado del workflow de GitHub Actions
+
+`.github/workflows/deploy.yml` daría despliegue **inmediato** en vez de esperar al
+timer, pero **falla en cada push** y sus secrets ya están configurados. La causa no
+es el workflow: el servidor tiene Tailscale SSH activo (`RunSSH: true`), que
+intercepta el puerto 22 para peers del tailnet y autentica por **ACL del tailnet**,
+ignorando la deploy key que el workflow carga con `webfactory/ssh-agent`. En el log
+del job se ve al servidor respondiendo `SSH-2.0-Tailscale` en vez de OpenSSH.
+
+Para habilitarlo hace falta una regla `ssh` en la ACL (admin console → Access
+Controls), no un cambio en el repo:
+
+```json
+"ssh": [
+  { "action": "accept", "src": ["tag:ci"], "dst": ["angel1"], "users": ["angel1"] }
+]
+```
+
+### Dos trampas del despliegue
+
+- **Las units de systemd instaladas son copias, no symlinks al repo.** Editar
+  `system/lab-dashboard-update.timer` y pushear **no** actualiza la que corre: hay
+  que copiarla a `/etc/systemd/system/` con sudo y hacer `daemon-reload`.
+- **La deploy key del servidor es de solo lectura.** Puede hacer `fetch`, no `push`.
+  Un commit hecho en caliente en `/opt/lab-dashboard` no puede subirse desde ahí;
+  hay que traerlo con `git bundle` y pushearlo desde una máquina con permiso de
+  escritura. Mientras ese commit siga sin subir, el árbol diverge y —si además queda
+  algo sin commitear— el updater aborta en el paso 1 en cada ciclo.
 
 El dashboard en sí (frontend + WebSocket + polling SSH a los servidores del lab) no
 depende de internet, solo de la red local — únicamente el auto-deploy necesita que
-este servidor alcance GitHub/Tailscale.
+este servidor alcance GitHub.
 
-Secrets a configurar en GitHub (`Settings → Secrets and variables → Actions`):
+Secrets configurados en GitHub (`Settings → Secrets and variables → Actions`), usados
+solo por el workflow:
 
 | Secret | Valor |
 |---|---|
-| `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_CLIENT_SECRET` | Cliente OAuth de Tailscale (admin console → Settings → OAuth clients), con el tag `tag:ci` autorizado en tu ACL |
-| `SSH_HOST` | IP o nombre MagicDNS Tailscale del servidor de destino |
-| `SSH_USER` | `dashboard-deploy` (usuario dedicado, no root ni tu usuario personal) |
-| `SSH_PRIVATE_KEY` | Clave privada de una **deploy key dedicada** (no tu clave personal), cuya pública está en `authorized_keys` del servidor |
-
-El servicio del sistema (`system/lab-dashboard-update.service` y `system/lab-dashboard-update.timer`)
-queda como fallback opcional por si Actions no puede alcanzar el servidor — no se instala por
-defecto. La versión actualizada usa `update-docker.sh` y maneja Docker builds + health check +
-rollback automático.
+| `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_CLIENT_SECRET` | Cliente OAuth de Tailscale (admin console → Settings → OAuth clients), con el tag `tag:ci` autorizado en la ACL |
+| `SSH_HOST` | IP Tailscale del servidor de destino |
+| `SSH_USER` | Usuario de despliegue en el servidor |
+| `SSH_PRIVATE_KEY` | Clave privada de una **deploy key dedicada** (no tu clave personal) |
 
 ## Agregar un servidor
 
@@ -178,7 +192,7 @@ El sistema incluye un servicio systemd para actualización automática vía Dock
 |---|---|
 | `system/update-docker.sh` | Script de actualización seguro con rollback automático |
 | `/etc/systemd/system/lab-dashboard-update.service` | Servicio oneshot que ejecuta el script |
-| `/etc/systemd/system/lab-dashboard-update.timer` | Timer opcional que revisa cada 30 minutos |
+| `/etc/systemd/system/lab-dashboard-update.timer` | Timer que revisa cada 2 minutos — es el mecanismo real de despliegue, no un opcional |
 
 ### Ejecutar actualización manual
 
@@ -192,11 +206,17 @@ Ver el resultado:
 journalctl -u lab-dashboard-update -n 50 --no-pager
 ```
 
-### Habilitar actualización periódica (cada 30 min)
+### Habilitar / reinstalar el timer (cada 2 min)
+
+Reinstalar hace falta cada vez que cambia el `.timer` del repo: la unit instalada es
+una copia, no un symlink.
 
 ```bash
-sudo systemctl enable lab-dashboard-update.timer
-sudo systemctl start lab-dashboard-update.timer
+cd /opt/lab-dashboard
+sudo cp system/lab-dashboard-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now lab-dashboard-update.timer
+systemctl list-timers lab-dashboard-update.timer --no-pager
 ```
 
 ### Ver estado del timer
