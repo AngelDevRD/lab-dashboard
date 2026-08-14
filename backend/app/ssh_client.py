@@ -187,7 +187,8 @@ class SSHConnection:
                     return False, (f"en backoff, próximo intento en {remaining:.0f}s")
                 self._connect_blocking()
             stdin, stdout, stderr = self._client.exec_command(
-                command, timeout=timeout or config.SSH_COMMAND_TIMEOUT
+                command,
+                timeout=config.SSH_COMMAND_TIMEOUT if timeout is None else timeout,
             )
             out = stdout.read().decode("utf-8", errors="replace")
             stdout.channel.recv_exit_status()

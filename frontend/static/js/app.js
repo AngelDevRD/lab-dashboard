@@ -301,9 +301,15 @@
     // Redibujar el canvas sólo cuando la serie cambió: con el keep-alive del
     // WebSocket puede llegar el mismo snapshot dos veces, y repintar N
     // sparklines idénticas es puro gasto en la tablet.
+    //
+    // La firma compara la serie entera y no un resumen (largo + último valor):
+    // la historia es una ventana deslizante de largo fijo, así que un pico que
+    // se corre fuera de la ventana no cambia ni el largo ni el último valor y
+    // quedaría dibujado para siempre. Recorrer 80 números es despreciable al
+    // lado de repintar el canvas.
     const hist = s.history || { cpu: [], mem: [] };
     if (hist.cpu.length >= 2 || hist.mem.length >= 2) {
-      const sig = `${themeEpoch}:${hist.cpu.length}:${hist.cpu[hist.cpu.length - 1]}:${hist.mem[hist.mem.length - 1]}`;
+      const sig = `${themeEpoch}:${hist.cpu.join()}|${hist.mem.join()}`;
       if (refs.last.spark !== sig) {
         refs.last.spark = sig;
         drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
@@ -777,7 +783,7 @@
 
     // Misma razón que en renderEvents: el conjunto de alertas activas cambia
     // de a ratos, no cada 3 segundos.
-    const sig = active.map((a) => `${a.id}|${a.severity}|${a.description}`).join(",");
+    const sig = active.map((a) => `${a.id}|${a.severity}|${a.server}|${a.description}`).join(",");
     if (sig === lastAlertsSig) return;
     lastAlertsSig = sig;
 
@@ -1219,6 +1225,12 @@
     if (state === "Bloqueado") return "ft-bad";
     return "ft-warn";
   };
+  // Todo lo que se interpola en las plantillas de esta vista viene del payload
+  // de /api/framework-telemetry/report, es decir de otra máquina: nombres de
+  // proyecto, agentes, resúmenes, rutas. Interpolarlo crudo en innerHTML deja
+  // que ese payload inyecte HTML/JS en el dashboard.
+  const esc = (v) => String(v ?? "--").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const timeAgoFmt = (iso) => {
     if (!iso) return "--";
     const d = new Date(iso);
@@ -1226,12 +1238,6 @@
     return d.toLocaleString();
   };
   const numFmt = (n) => (n == null ? "--" : esc(n.toLocaleString("es")));
-  // Todo lo que se interpola en las plantillas de esta vista viene del payload
-  // de /api/framework-telemetry/report, es decir de otra máquina: nombres de
-  // proyecto, agentes, resúmenes, rutas. Interpolarlo crudo en innerHTML deja
-  // que ese payload inyecte HTML/JS en el dashboard.
-  const esc = (v) => String(v ?? "--").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   let ftProjectsCache = [];
 
   async function renderFrameworkTelemetry() {

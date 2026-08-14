@@ -21,3 +21,8 @@ def mock_env(monkeypatch, tmp_path):
     monkeypatch.setattr("app.alerts.center.ALERTS_FILE", tmp_path / "alerts_history.json")
     monkeypatch.setattr("app.alerts.center.alert_center._alerts", {})
     monkeypatch.setattr("app.alerts.center.alert_center._order", [])
+    # Los singletons ya se construyeron al importar, con lo que hubiera en
+    # disco en ese momento: parchear las rutas de arriba no los limpia.
+    # monitor.snapshot() consulta este servicio, así que sin esto un pytest
+    # después de una corrida local del backend arrastra sus alertas activas.
+    monkeypatch.setattr("app.alerts.service.notification_service._active_keys", {})
