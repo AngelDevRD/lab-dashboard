@@ -3,8 +3,45 @@ services:
     build: .
     container_name: lab-dashboard
     restart: unless-stopped
+    # 8600 atado a loopback (auditoría 2026-08-13).
+    #
+    # Los puertos publicados por Docker crean reglas DNAT en PREROUTING que se
+    # evalúan ANTES que UFW, así que este puerto quedaba abierto a toda la LAN
+    # y al tailnet aunque UFW solo permitiera el 80: se podia saltar nginx y su
+    # TLS yendo directo a 192.168.100.8:8600 en claro.
+    #
+    # No basta con reglas en DOCKER-USER: ts-forward acepta el trafico que
+    # entra por tailscale0 antes de que la cadena DOCKER-USER llegue a verlo.
+    # Atarlo a loopback es la unica via fiable.
+    #
+    # No rompe ningun acceso: nginx expone el dashboard por dos vias, las dos
+    # proxy a 127.0.0.1:8600 y las dos gobernadas por UFW, porque son listeners
+    # de nginx y no DNAT de Docker:
+    #   - 443 con TLS: https://192.168.100.8/ y https://100.70.1.38/
+    #   - 8600 en claro, solo LAN: http://192.168.100.8:8600/
+    #
+    # El listener del 8600 se anadio para acceder desde la tablet sin lidiar con
+    # el certificado self-signed. Esta atado a la IP de la LAN, no a 0.0.0.0, asi
+    # que el tailnet NO lo ve (comprobado: 100.70.1.38:8600 rechaza conexion).
+    # Requiere net.ipv4.ip_nonlocal_bind=1 porque el WiFi levanta despues que
+    # nginx en el arranque. Config en /etc/nginx/sites-available/lab-dashboard-lan.
+    #
+    # Depende TAMBIEN de una regla UFW, porque la politica de entrada es DROP:
+    #   ufw allow in on wlp1s0 from 192.168.100.0/24 to 192.168.100.8 \
+    #       port 8600 proto tcp    # comment: "Lab Dashboard LAN only"
+    # Sin esa regla el puerto queda mudo desde la LAN aunque nginx escuche bien.
+    # Es la contrapartida de dejar de usar el DNAT de Docker: ahora el trafico
+    # SI atraviesa UFW, que es lo que se buscaba, pero hay que permitirlo.
+    #
+    # Trampa al depurar: un curl a 192.168.100.8 desde este mismo host sale por
+    # lo (ver `ip route get 192.168.100.8`) y esquiva UFW, asi que un 200 local
+    # NO prueba que se llegue desde la LAN. Verificar con un cliente real o
+    # mirando /var/log/nginx/access.log.
     ports:
-      - "8600:8600"
+      - "127.0.0.1:8600:8600"
+    # Techos, no reservas. Uso real observado: 52 MB.
+    mem_limit: 384m
+    pids_limit: 256
     env_file:
       - ./backend/.env
     environment:
