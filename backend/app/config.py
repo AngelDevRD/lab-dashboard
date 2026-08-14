@@ -13,11 +13,21 @@ load_dotenv(BASE_DIR / ".env")
 SERVERS_FILE = Path(os.getenv("SERVERS_FILE", BASE_DIR / "servers.json"))
 SSH_KEY_PATH = os.getenv("SSH_KEY_PATH", str(Path.home() / ".ssh" / "id_ed25519"))
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "3"))
-BROADCAST_INTERVAL = float(os.getenv("BROADCAST_INTERVAL", "2"))
 HISTORY_LEN = int(os.getenv("HISTORY_LEN", "40"))
 WS_SEND_TIMEOUT = float(os.getenv("WS_SEND_TIMEOUT", "5"))
+# Techo entre mensajes por WebSocket. El broadcast se dispara con cada ciclo de
+# poll, pero un ciclo lento (un host que acepta TCP y después se cuelga hasta
+# SSH_BATCH_TIMEOUT) dejaría al cliente sin mensajes: su watchdog lo lee como
+# conexión muerta y fuerza una reconexión. Este keep-alive reenvía el último
+# snapshot para evitarlo. Debe quedar por debajo de WS_STALE_MS del frontend.
+WS_HEARTBEAT_INTERVAL = float(os.getenv("WS_HEARTBEAT_INTERVAL", "5"))
 SSH_TIMEOUT = float(os.getenv("SSH_TIMEOUT", "5"))
 SSH_COMMAND_TIMEOUT = float(os.getenv("SSH_COMMAND_TIMEOUT", "8"))
+# Techo para una tanda completa de comandos (ver ssh_client._build_batch), que
+# viaja en un solo exec_command. Acota el peor caso de un ciclo: antes cada
+# comando tenía su propio SSH_COMMAND_TIMEOUT y la tanda podía tardar
+# SSH_COMMAND_TIMEOUT × n.
+SSH_BATCH_TIMEOUT = float(os.getenv("SSH_BATCH_TIMEOUT", "25"))
 SSH_BACKOFF_BASE = float(os.getenv("SSH_BACKOFF_BASE", "2"))
 SSH_BACKOFF_MAX = float(os.getenv("SSH_BACKOFF_MAX", "60"))
 INTERNET_CHECK_TARGETS = ["8.8.8.8", "1.1.1.1"]
@@ -88,15 +98,36 @@ class ServerConfig(BaseModel):
     ssh_user: str = Field(default="ubuntu", min_length=1)
 
 
+# (mtime_ns, size) del archivo ya parseado -> lista validada. El loop de
+# monitoreo llama load_servers() en cada ciclo (y el endpoint /advanced en cada
+# request): releer + validar con pydantic un archivo que casi nunca cambia es
+# trabajo puro de descarte. Se revalida solo si el archivo cambió en disco, así
+# que editar servers.json sigue tomando efecto sin reiniciar.
+_servers_cache: tuple[tuple, list[dict]] | None = None
+
+
+def _read_servers() -> list[dict]:
+    with open(SERVERS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    validated = [ServerConfig(**s) for s in data.get("servers", [])]
+    return [s.model_dump() for s in validated]
+
+
 def load_servers() -> list[dict]:
-    if not SERVERS_FILE.exists():
-        return []
+    global _servers_cache
     try:
-        with open(SERVERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        raw_list = data.get("servers", [])
-        validated = [ServerConfig(**s) for s in raw_list]
-        return [s.model_dump() for s in validated]
+        stat = SERVERS_FILE.stat()
+    except OSError:
+        _servers_cache = None
+        return []
+    stamp = (str(SERVERS_FILE), stat.st_mtime_ns, stat.st_size)
+    if _servers_cache is not None and _servers_cache[0] == stamp:
+        return _servers_cache[1]
+    try:
+        servers = _read_servers()
     except Exception as exc:
         logger.error("Error loading %s: %s", SERVERS_FILE, exc)
+        _servers_cache = None
         return []
+    _servers_cache = (stamp, servers)
+    return servers

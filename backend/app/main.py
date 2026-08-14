@@ -75,8 +75,19 @@ manager = ConnectionManager()
 
 
 async def _broadcast_loop() -> None:
+    # Se despierta cuando el monitor termina un ciclo, no a intervalo fijo. El
+    # BROADCAST_INTERVAL anterior era independiente de POLL_INTERVAL: al ser
+    # menor reenviaba el mismo snapshot dos veces (tráfico y render en la
+    # tablet por datos que no cambiaron) y al ser mayor retrasaba datos ya
+    # listos. WS_HEARTBEAT_INTERVAL sólo acota el silencio máximo.
     while True:
-        await asyncio.sleep(config.BROADCAST_INTERVAL)
+        try:
+            await asyncio.wait_for(
+                monitor.updated.wait(), timeout=config.WS_HEARTBEAT_INTERVAL
+            )
+        except asyncio.TimeoutError:
+            pass  # keep-alive: ver WS_HEARTBEAT_INTERVAL
+        monitor.updated.clear()
         if manager.active:
             started = time.monotonic()
             try:

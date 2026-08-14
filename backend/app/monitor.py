@@ -70,11 +70,27 @@ class Monitor:
         self._task: asyncio.Task | None = None
         self._running = False
         self._pushed_devices: dict[str, dict] = {}
+        # snapshot() corre autonomy.estimate + confidence.for_server + copias de
+        # histórico por servidor. Antes se recalculaba entero en cada broadcast
+        # (BROADCAST_INTERVAL) y en cada GET /api/status -- o sea varias veces
+        # entre dos ciclos de poll, sobre exactamente los mismos datos, y una
+        # vez más por cada tablet en modo fallback. Ahora se arma una sola vez
+        # por ciclo y se reusa hasta que hay datos nuevos.
+        self._snapshot_cache: dict | None = None
+        # Se dispara cuando hay datos nuevos: el broadcast por WebSocket espera
+        # esta señal en vez de despertarse a intervalo fijo, así los clientes
+        # reciben un mensaje por ciclo real en lugar de repeticiones idénticas.
+        self.updated = asyncio.Event()
+
+    def _invalidate(self) -> None:
+        self._snapshot_cache = None
+        self.updated.set()
 
     def report_device(self, device_id: str, payload: dict) -> None:
         """Stores a self-reported connectivity snapshot pushed by a device that the
         dashboard cannot reach over SSH (Windows PC, Android tablet)."""
         self._pushed_devices[device_id] = {**payload, "last_seen": time.time()}
+        self._invalidate()
 
     async def _poll_server(self, server: dict) -> None:
         conn = pool.get(server)
@@ -246,6 +262,7 @@ class Monitor:
                 # that would freeze every server's data forever with no visible
                 # error (the task's exception is only surfaced at GC time).
                 logger.exception("monitor loop iteration crashed, continuing")
+            self._invalidate()
             await asyncio.sleep(config.POLL_INTERVAL)
 
     def start(self) -> None:
@@ -298,6 +315,11 @@ class Monitor:
         return {host: autonomy.metrics(state) for host, state in self._autonomy_state.items()}
 
     def snapshot(self) -> dict:
+        if self._snapshot_cache is None:
+            self._snapshot_cache = self._build_snapshot()
+        return self._snapshot_cache
+
+    def _build_snapshot(self) -> dict:
         ordered_hosts = self._server_order or list(self.servers_status.keys())
         servers = []
         for h in ordered_hosts:

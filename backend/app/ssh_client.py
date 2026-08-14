@@ -14,6 +14,52 @@ KNOWN_HOSTS_PATH = (
 )
 
 
+# Marcador que separa la salida de cada comando dentro de una tanda. Ver
+# _build_batch: toda la tanda viaja en un solo exec_command en vez de uno por
+# comando.
+_BATCH_MARK = "__LABDASH_C7F3__"
+
+
+def _build_batch(commands: dict[str, str]) -> str:
+    """Concatena la tanda en un solo script de shell, con un marcador antes de
+    la salida de cada comando.
+
+    Cada exec_command abre un canal SSH nuevo (open + exec + datos + close):
+    con ~14 comandos por ciclo y varios servidores cada POLL_INTERVAL eso son
+    decenas de canales por ciclo, todos secuenciales bajo el mismo lock. Un
+    solo canal por tanda deja el costo en un round-trip.
+
+    `exec 2>/dev/null` al inicio manda todo stderr al vacío: _run_blocking
+    lee stdout pero nunca drena stderr, así que un comando charlatán podría
+    llenar el buffer del canal y bloquear la lectura.
+    """
+    parts = ["exec 2>/dev/null"]
+    for key, cmd in commands.items():
+        parts.append(f"echo '{_BATCH_MARK}{key}'")
+        parts.append(cmd)
+    return "\n".join(parts)
+
+
+def _split_batch(output: str, commands: dict[str, str]) -> dict[str, tuple[bool, str]]:
+    """Parte la salida de la tanda por los marcadores de _build_batch."""
+    chunks: dict[str, str] = {}
+    key: str | None = None
+    lines: list[str] = []
+    for line in output.split("\n"):
+        if line.startswith(_BATCH_MARK):
+            if key is not None:
+                chunks[key] = "\n".join(lines)
+            key = line[len(_BATCH_MARK):].strip()
+            lines = []
+        elif key is not None:
+            lines.append(line)
+    if key is not None:
+        chunks[key] = "\n".join(lines)
+    # Un comando cuyo marcador no aparece (salida truncada) se reporta como
+    # fallo de ese comando, no de toda la tanda.
+    return {k: (k in chunks, chunks.get(k, "")) for k in commands}
+
+
 def classify_ssh_error(message: str) -> str:
     """Map a raw SSH error string to a stable reason code.
 
@@ -131,7 +177,7 @@ class SSHConnection:
         self._client = client
         self._on_connect_success()
 
-    def _run_blocking(self, command: str) -> tuple[bool, str]:
+    def _run_blocking(self, command: str, timeout: float | None = None) -> tuple[bool, str]:
         try:
             transport = self._client.get_transport() if self._client else None
             needs_connect = transport is None or not transport.is_active()
@@ -141,7 +187,7 @@ class SSHConnection:
                     return False, (f"en backoff, próximo intento en {remaining:.0f}s")
                 self._connect_blocking()
             stdin, stdout, stderr = self._client.exec_command(
-                command, timeout=config.SSH_COMMAND_TIMEOUT
+                command, timeout=timeout or config.SSH_COMMAND_TIMEOUT
             )
             out = stdout.read().decode("utf-8", errors="replace")
             stdout.channel.recv_exit_status()
@@ -155,17 +201,22 @@ class SSHConnection:
             return await asyncio.to_thread(self._run_blocking, command)
 
     async def run_many(self, commands: dict[str, str]) -> dict[str, tuple[bool, str]]:
+        """Ejecuta toda la tanda en un único canal SSH (ver _build_batch).
+
+        Un fallo de SSH (conexión caída, backoff, timeout de la tanda entera)
+        marca todos los comandos como fallidos, igual que antes; la diferencia
+        es que ahora el timeout acota la tanda completa en vez de aplicarse
+        por comando (antes el peor caso era SSH_COMMAND_TIMEOUT × n).
+        """
+        if not commands:
+            return {}
         async with self._lock:
-            results: dict[str, tuple[bool, str]] = {}
-            for key, cmd in commands.items():
-                ok, out = await asyncio.to_thread(self._run_blocking, cmd)
-                results[key] = (ok, out)
-                if not ok:
-                    for remaining in commands:
-                        if remaining not in results:
-                            results[remaining] = (False, out)
-                    break
-            return results
+            ok, out = await asyncio.to_thread(
+                self._run_blocking, _build_batch(commands), config.SSH_BATCH_TIMEOUT
+            )
+            if not ok:
+                return {key: (False, out) for key in commands}
+            return _split_batch(out, commands)
 
     def close(self) -> None:
         self._close_client(self._client)

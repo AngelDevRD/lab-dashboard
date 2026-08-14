@@ -150,6 +150,38 @@ def test_power_display_smoothing_with_raw_field():
     assert power["power_now_w"] != power["power_now_raw_w"]
 
 
+def test_snapshot_is_reused_until_there_is_new_data():
+    """snapshot() se arma una vez por ciclo de poll: antes se recalculaba
+    entero en cada broadcast y en cada GET /api/status sobre los mismos
+    datos. _invalidate() (fin de ciclo, o un push de dispositivo) es lo
+    único que fuerza a rearmarlo."""
+    monitor = Monitor()
+    monitor._server_order = [HOST]
+    monitor.servers_status[HOST] = fake_server_snapshot()
+
+    first = monitor.snapshot()
+    assert monitor.snapshot() is first
+
+    monitor.servers_status[HOST] = fake_server_snapshot(name="Renombrado")
+    assert monitor.snapshot() is first, "sin datos nuevos declarados no se rearma"
+
+    monitor._invalidate()
+    rebuilt = monitor.snapshot()
+    assert rebuilt is not first
+    assert rebuilt["servers"][0]["name"] == "Renombrado"
+
+
+def test_pushed_device_invalidates_the_snapshot():
+    monitor = Monitor()
+    monitor._server_order = [HOST]
+    monitor.servers_status[HOST] = fake_server_snapshot()
+    monitor.snapshot()
+
+    monitor.report_device("tablet", {"status": "ok"})
+    devices = monitor.snapshot()["connectivity"]
+    assert any(d["device_id"] == "tablet" for d in devices)
+
+
 def test_power_display_resets_on_status_change():
     """Un cambio real de status (Charging -> Discharging) no debe quedar
     'contaminado' por el promedio del regimen anterior -- validado contra
