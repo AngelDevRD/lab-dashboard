@@ -35,6 +35,23 @@ LOG_FILE = Path(os.getenv("LOG_FILE", BASE_DIR.parent / "logs" / "events.log"))
 LOG_FILE_MAX_BYTES = int(os.getenv("LOG_FILE_MAX_BYTES", str(5 * 1024 * 1024)))
 LOG_FILE_BACKUP_COUNT = int(os.getenv("LOG_FILE_BACKUP_COUNT", "5"))
 
+# Estado persistido del centro de alertas y del servicio de notificaciones.
+# Antes eran Path("/logs/...") hardcodeadas en alerts/center.py y
+# alerts/service.py: correcto dentro del contenedor (compose monta ./logs en
+# /logs), pero fuera de él apuntaban a la raíz del disco y el estado no se
+# guardaba nunca. Se derivan de LOG_FILE, que ya define dónde vive el estado en
+# disco de esta instancia, así que el resultado dentro del contenedor no cambia.
+ALERTS_HISTORY_FILE = Path(
+    os.getenv("ALERTS_HISTORY_FILE", str(LOG_FILE.parent / "alerts_history.json"))
+)
+NOTIFICATION_STATE_FILE = Path(
+    os.getenv("NOTIFICATION_STATE_FILE", str(LOG_FILE.parent / "notification_state.json"))
+)
+# Se crea acá, junto a la definición de las rutas, y no al importar quien las
+# use: center.py se instancia al importarse y no depende de que events.py haya
+# entrado primero.
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
 NETWORK_REPORT_TOKEN = os.getenv("NETWORK_REPORT_TOKEN", "")
 NETWORK_DEVICE_STALE_SEC = float(os.getenv("NETWORK_DEVICE_STALE_SEC", "60"))
 

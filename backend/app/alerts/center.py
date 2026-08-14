@@ -1,14 +1,14 @@
 import json
 import logging
 import time
-from pathlib import Path
 from typing import Optional
 
+from .. import config
 from .models import Alert, AlertStatus
 
 logger = logging.getLogger("dashboard")
 
-ALERTS_FILE = Path("/logs/alerts_history.json")
+ALERTS_FILE = config.ALERTS_HISTORY_FILE
 
 
 class AlertCenter:

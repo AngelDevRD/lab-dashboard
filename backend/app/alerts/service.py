@@ -3,9 +3,9 @@ import hashlib
 import json
 import logging
 import time
-from pathlib import Path
 from typing import Optional
 
+from .. import config
 from .models import Alert, AlertStatus
 from .center import alert_center
 from .engine import evaluate_server
@@ -17,7 +17,7 @@ logger = logging.getLogger("dashboard")
 
 NOTIFIABLE_SEVERITIES = ("CRITICAL", "EMERGENCY")
 
-STATE_FILE = Path("/logs/notification_state.json")
+STATE_FILE = config.NOTIFICATION_STATE_FILE
 
 
 def _hash_id(server_host: str, category: str, title: str) -> str:
