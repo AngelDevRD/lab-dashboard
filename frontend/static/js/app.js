@@ -52,13 +52,30 @@
     if (el.className !== target) el.className = target;
   }
 
+  // Los colores salen de variables CSS, que sólo cambian al alternar el tema.
+  // getComputedStyle fuerza recalcular estilo del documento: llamarlo en cada
+  // dibujo (por servidor, por tick) es trabajo repetido sobre valores fijos.
+  let themeColors = null;
+  let themeEpoch = 0;
+  function colors() {
+    if (!themeColors) {
+      const style = getComputedStyle(document.documentElement);
+      themeColors = {
+        text2: style.getPropertyValue("--text-2").trim(),
+        accent: style.getPropertyValue("--accent").trim(),
+        border: style.getPropertyValue("--panel-border").trim(),
+      };
+    }
+    return themeColors;
+  }
+
   function drawSparkline(canvas, cpuSeries, memSeries) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    const style = getComputedStyle(document.documentElement);
+    const style = colors();
     const gap = 2;
     const bandH = (h - gap) / 2;
     const plot = (series, color, top) => {
@@ -75,8 +92,8 @@
       });
       ctx.stroke();
     };
-    plot(memSeries, style.getPropertyValue("--text-2").trim(), 0);
-    plot(cpuSeries, style.getPropertyValue("--accent").trim(), bandH + gap);
+    plot(memSeries, style.text2, 0);
+    plot(cpuSeries, style.accent, bandH + gap);
   }
 
   function round5(sec) {
@@ -256,6 +273,7 @@
       autoState.delete(s.host);
       const offCtx = refs.el.sparkline.getContext("2d");
       if (offCtx) offCtx.clearRect(0, 0, refs.el.sparkline.width, refs.el.sparkline.height);
+      refs.last.spark = null; // el canvas quedó vacío: repintar al volver online
       flagAlert(s, false);
       if (s.host === selectedHost) renderDetail(s);
       return;
@@ -280,8 +298,17 @@
     setBar(refs, "memBar", memPct);
     setBar(refs, "diskBar", diskPct);
 
+    // Redibujar el canvas sólo cuando la serie cambió: con el keep-alive del
+    // WebSocket puede llegar el mismo snapshot dos veces, y repintar N
+    // sparklines idénticas es puro gasto en la tablet.
     const hist = s.history || { cpu: [], mem: [] };
-    if (hist.cpu.length >= 2 || hist.mem.length >= 2) drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
+    if (hist.cpu.length >= 2 || hist.mem.length >= 2) {
+      const sig = `${themeEpoch}:${hist.cpu.length}:${hist.cpu[hist.cpu.length - 1]}:${hist.mem[hist.mem.length - 1]}`;
+      if (refs.last.spark !== sig) {
+        refs.last.spark = sig;
+        drawSparkline(refs.el.sparkline, hist.cpu, hist.mem);
+      }
+    }
 
     setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
 
@@ -715,7 +742,14 @@
     }
   }
 
+  // El log llega entero en cada snapshot y casi nunca cambia (un evento es
+  // algo excepcional: servidor caído, internet cortado). Reconstruir 20 <li>
+  // en cada tick era el trabajo de DOM más caro del ciclo, sin cambio visible.
+  let lastEventsSig = null;
   function renderEvents(events) {
+    const sig = events.length ? `${events.length}:${events[0].time}:${events[0].message}` : "0";
+    if (sig === lastEventsSig) return;
+    lastEventsSig = sig;
     renderEventItems(document.getElementById("event-log"), events);
   }
 
@@ -734,12 +768,18 @@
     renderEventItems(ul, filtered);
   }
 
+  let lastAlertsSig = null;
   function renderAlerts(alerts) {
-
     const active = alerts.filter((a) => a.status === "active");
     const badge = document.getElementById("alert-badge");
     badge.textContent = active.length;
     badge.classList.toggle("hidden", active.length === 0);
+
+    // Misma razón que en renderEvents: el conjunto de alertas activas cambia
+    // de a ratos, no cada 3 segundos.
+    const sig = active.map((a) => `${a.id}|${a.severity}|${a.description}`).join(",");
+    if (sig === lastAlertsSig) return;
+    lastAlertsSig = sig;
 
     const list = document.getElementById("alert-list");
     list.textContent = "";
@@ -791,7 +831,8 @@
   }
 
   // --- WebSocket with polling fallback ---
-  // The server broadcasts every BROADCAST_INTERVAL (~2s). A WS can go "half-open"
+  // The server broadcasts once per poll cycle, plus a keep-alive if a cycle
+  // runs long (WS_HEARTBEAT_INTERVAL, 5s). A WS can go "half-open"
   // (wifi drop, device sleep, NAT rebind) without ever firing onclose/onerror,
   // since nothing here sends TCP keepalives or WS ping/pong. A watchdog that
   // forces a reconnect when no message has arrived in a while is what actually
@@ -1181,10 +1222,16 @@
   const timeAgoFmt = (iso) => {
     if (!iso) return "--";
     const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
+    if (Number.isNaN(d.getTime())) return esc(iso);
     return d.toLocaleString();
   };
-  const numFmt = (n) => (n == null ? "--" : n.toLocaleString("es"));
+  const numFmt = (n) => (n == null ? "--" : esc(n.toLocaleString("es")));
+  // Todo lo que se interpola en las plantillas de esta vista viene del payload
+  // de /api/framework-telemetry/report, es decir de otra máquina: nombres de
+  // proyecto, agentes, resúmenes, rutas. Interpolarlo crudo en innerHTML deja
+  // que ese payload inyecte HTML/JS en el dashboard.
+  const esc = (v) => String(v ?? "--").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   let ftProjectsCache = [];
 
   async function renderFrameworkTelemetry() {
@@ -1208,17 +1255,17 @@
         card.className = "card server-card ft-clickable";
         card.innerHTML = `
           <div class="card-header">
-            <div class="server-title"><h2 class="server-name">${p.project ?? "--"}</h2></div>
-            <span class="status-text ${finalStateClass(p.lastFinalState)}">${p.lastFinalState ?? "--"}</span>
+            <div class="server-title"><h2 class="server-name">${esc(p.project)}</h2></div>
+            <span class="status-text ${finalStateClass(p.lastFinalState)}">${esc(p.lastFinalState)}</span>
           </div>
           <div class="mini-stats">
-            <div class="mini"><span class="mini-label">Último agente</span><span class="mini-value">${p.lastAgent ?? "--"}</span></div>
-            <div class="mini"><span class="mini-label">Sesiones vistas</span><span class="mini-value">${p.sessionsSeen ?? "--"}</span></div>
+            <div class="mini"><span class="mini-label">Último agente</span><span class="mini-value">${esc(p.lastAgent)}</span></div>
+            <div class="mini"><span class="mini-label">Sesiones vistas</span><span class="mini-value">${esc(p.sessionsSeen)}</span></div>
             <div class="mini"><span class="mini-label">Última sesión</span><span class="mini-value">${timeAgoFmt(p.lastTimestamp)}</span></div>
-            <div class="mini"><span class="mini-label">Versión framework</span><span class="mini-value">${p.frameworkVersion ?? "--"}</span></div>
+            <div class="mini"><span class="mini-label">Versión framework</span><span class="mini-value">${esc(p.frameworkVersion)}</span></div>
           </div>
           <div class="card-footer">
-            <span>${p.lastSummary ?? ""}</span>
+            <span>${esc(p.lastSummary ?? "")}</span>
           </div>`;
         card.addEventListener("click", () => openProjectDetail(p));
         grid.appendChild(card);
@@ -1268,16 +1315,16 @@
     return rows.map(([name, val]) => {
       const count = typeof val === "object" ? val.count : val;
       const errors = typeof val === "object" ? val.errors : 0;
-      const errTag = errors > 0 ? `<span class="pd-err">${errors} error${errors === 1 ? "" : "es"}</span>` : "";
+      const errTag = errors > 0 ? `<span class="pd-err">${numFmt(errors)} error${errors === 1 ? "" : "es"}</span>` : "";
       const label = stripMcpPrefix ? name.replace(/^mcp__/, "") : name;
-      return `<div class="pd-bar-row"><span class="pd-bar-name">${label}</span><span class="pd-bar-count">${numFmt(count)}</span>${errTag}</div>`;
+      return `<div class="pd-bar-row"><span class="pd-bar-name">${esc(label)}</span><span class="pd-bar-count">${numFmt(count)}</span>${errTag}</div>`;
     }).join("");
   }
 
   function statusBadgeHTML(status) {
     const cls = status === "passed" || status === "APPROVED" ? "ft-ok"
       : status === "failed" || status === "REJECTED" ? "ft-bad" : "ft-warn";
-    return `<span class="status-text ${cls}">${status ?? "--"}</span>`;
+    return `<span class="status-text ${cls}">${esc(status)}</span>`;
   }
 
   // Checklist de COBERTURA (que collector encontro datos vs. no) -- itera las
@@ -1287,7 +1334,7 @@
     const entries = Object.entries(coverage || {}).sort((a, b) => a[0].localeCompare(b[0]));
     if (entries.length === 0) return `<p class="pd-empty">Sin datos de cobertura.</p>`;
     return `<div class="pd-coverage-grid">${entries.map(([name, has]) =>
-      `<span class="pd-coverage-chip ${has ? "pd-ok" : "pd-missing"}">${has ? "✓" : "✗"} ${name}</span>`
+      `<span class="pd-coverage-chip ${has ? "pd-ok" : "pd-missing"}">${has ? "✓" : "✗"} ${esc(name)}</span>`
     ).join("")}</div>`;
   }
 
@@ -1300,31 +1347,31 @@
     for (const t of techs) { if (!byCategory[t.category]) byCategory[t.category] = []; byCategory[t.category].push(t); }
     return Object.entries(byCategory).map(([cat, items]) => `
       <div class="pd-tech-group">
-        <span class="pd-tech-cat">${cat}</span>
-        ${items.map((t) => `<span class="pd-tech-badge" title="Fuente: ${t.source}">${t.id}${t.version ? " " + t.version : ""}</span>`).join("")}
+        <span class="pd-tech-cat">${esc(cat)}</span>
+        ${items.map((t) => `<span class="pd-tech-badge" title="Fuente: ${esc(t.source)}">${esc(t.id)}${t.version ? " " + esc(t.version) : ""}</span>`).join("")}
       </div>`).join("");
   }
 
   function dockerSnapshotHTML(d) {
     if (!d) return `<p class="pd-empty">Sin Docker detectado.</p>`;
-    const services = (d.services || []).map((s) => `<span class="pd-tech-badge">${s}</span>`).join("") || `<span class="pd-empty">Sin servicios en compose.</span>`;
+    const services = (d.services || []).map((s) => `<span class="pd-tech-badge">${esc(s)}</span>`).join("") || `<span class="pd-empty">Sin servicios en compose.</span>`;
     return `
       <div class="mini-stats">
         <div class="mini"><span class="mini-label">Dockerfile</span><span class="mini-value">${d.hasDockerfile ? "Sí" : "No"}</span></div>
-        <div class="mini"><span class="mini-label">Compose</span><span class="mini-value">${d.hasCompose ? d.composeFile : "No"}</span></div>
+        <div class="mini"><span class="mini-label">Compose</span><span class="mini-value">${d.hasCompose ? esc(d.composeFile) : "No"}</span></div>
       </div>
       <div class="pd-tech-group">${services}</div>`;
   }
 
   function kubernetesSnapshotHTML(k) {
     if (!k) return `<p class="pd-empty">Sin manifests K8s detectados.</p>`;
-    return `<div class="pd-tech-group">${(k.kinds || []).map((k2) => `<span class="pd-tech-badge">${k2.kind} × ${k2.count}</span>`).join("")}</div>`;
+    return `<div class="pd-tech-group">${(k.kinds || []).map((k2) => `<span class="pd-tech-badge">${esc(k2.kind)} × ${numFmt(k2.count)}</span>`).join("")}</div>`;
   }
 
   function gitHistoryHTML(g) {
     if (!g) return `<p class="pd-empty">Sin historial git todavía.</p>`;
     const contributors = (g.contributors || []).map((c) =>
-      `<div class="pd-bar-row"><span class="pd-bar-name">${c.name}</span><span class="pd-bar-count">${numFmt(c.commits)}</span></div>`
+      `<div class="pd-bar-row"><span class="pd-bar-name">${esc(c.name)}</span><span class="pd-bar-count">${numFmt(c.commits)}</span></div>`
     ).join("") || `<p class="pd-empty">Sin contribuidores.</p>`;
     return `
       <div class="mini-stats">
@@ -1340,25 +1387,25 @@
     if (!qg) return `<p class="pd-empty">Sin Quality Gate reciente.</p>`;
     const stacks = (qg.stacksDetected || []).join(", ") || "--";
     const checks = Object.entries(qg.checks || {}).map(([name, c]) =>
-      `<div class="pd-bar-row"><span class="pd-bar-name">${name}</span>${statusBadgeHTML(c.status)}</div>`
+      `<div class="pd-bar-row"><span class="pd-bar-name">${esc(name)}</span>${statusBadgeHTML(c.status)}</div>`
     ).join("");
     return `
       <div class="mini-stats">
         <div class="mini"><span class="mini-label">Resultado</span>${statusBadgeHTML(qg.qualityGate)}</div>
-        <div class="mini"><span class="mini-label">Stack</span><span class="mini-value">${stacks}</span></div>
+        <div class="mini"><span class="mini-label">Stack</span><span class="mini-value">${esc(stacks)}</span></div>
       </div>
       ${checks}`;
   }
 
   function securityHistoryHTML(sec) {
     if (!sec) return `<p class="pd-empty">Sin escaneo de seguridad reciente.</p>`;
-    return `<div class="pd-bar-row"><span class="pd-bar-name">${sec.details ?? "--"}</span>${statusBadgeHTML(sec.status)}</div>`;
+    return `<div class="pd-bar-row"><span class="pd-bar-name">${esc(sec.details)}</span>${statusBadgeHTML(sec.status)}</div>`;
   }
 
   function routerHistoryHTML(r) {
     if (!r || !r.delegations || r.delegations.length === 0) return `<p class="pd-empty">Sin delegaciones a RouterAgent en esta sesión.</p>`;
     return r.delegations.map((d) =>
-      `<div class="pd-bar-row"><span class="pd-bar-name">${d.taskType} → ${d.provider}</span><span class="pd-bar-count">${d.ms}ms</span>${d.success ? "" : '<span class="pd-err">error</span>'}</div>`
+      `<div class="pd-bar-row"><span class="pd-bar-name">${esc(d.taskType)} → ${esc(d.provider)}</span><span class="pd-bar-count">${numFmt(d.ms)}ms</span>${d.success ? "" : '<span class="pd-err">error</span>'}</div>`
     ).join("");
   }
 
@@ -1366,7 +1413,7 @@
   // arriba se muestra igual, como tabla clave/valor -- nunca desaparece del
   // overlay solo por ser nuevo.
   function genericJSONHTML(value) {
-    return `<pre class="pd-generic-json">${JSON.stringify(value, null, 2)}</pre>`;
+    return `<pre class="pd-generic-json">${esc(JSON.stringify(value, null, 2))}</pre>`;
   }
 
   const SNAPSHOT_RENDERERS = {
@@ -1376,10 +1423,10 @@
     metrics: (v) => countBarsHTML(Object.fromEntries((v?.byExtension || []).map((e) => [e.extension, e.count]))),
     project: (v) => `
       <div class="mini-stats">
-        <div class="mini"><span class="mini-label">Tipo</span><span class="mini-value">${v.projectType ?? "--"}</span></div>
-        <div class="mini"><span class="mini-label">Modo desarrollo</span><span class="mini-value">${v.developmentMode ?? "--"}</span></div>
-        <div class="mini"><span class="mini-label">Config</span><span class="mini-value">${v.configSource ?? "--"}</span></div>
-        <div class="mini"><span class="mini-label">Creado</span><span class="mini-value">${v.createdAt ?? "--"}</span></div>
+        <div class="mini"><span class="mini-label">Tipo</span><span class="mini-value">${esc(v.projectType)}</span></div>
+        <div class="mini"><span class="mini-label">Modo desarrollo</span><span class="mini-value">${esc(v.developmentMode)}</span></div>
+        <div class="mini"><span class="mini-label">Config</span><span class="mini-value">${esc(v.configSource)}</span></div>
+        <div class="mini"><span class="mini-label">Creado</span><span class="mini-value">${esc(v.createdAt)}</span></div>
       </div>`,
     recommendedAgents: (v) => countBarsHTML(Object.fromEntries((v || []).map((a) => [a.agent, a.score]))),
   };
@@ -1412,12 +1459,12 @@
       const label = SECTION_LABELS[name] || name;
       const renderer = renderers[name];
       const body = renderer ? renderer(value) : genericJSONHTML(value);
-      return `<h3>${label}</h3>${body}`;
+      return `<h3>${esc(label)}</h3>${body}`;
     }).join("");
   }
 
   function openProjectDetail(p) {
-    document.getElementById("pd-name").textContent = p.project ?? "--";
+    document.getElementById("pd-name").textContent = p.project ?? "--"; // textContent: no interpola HTML
 
     const sessions = [...(p.sessions || [])].sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
     const latestHistory = {};
@@ -1436,13 +1483,14 @@
       ${renderSections(p.snapshot, SNAPSHOT_RENDERERS)}
       ${renderSections(latestHistory, HISTORY_RENDERERS)}
 
-      <h3>Timeline de sesiones (${sessions.length})</h3>
+      <h3>Timeline de sesiones (${numFmt(sessions.length)})</h3>
       <ul class="event-log session-list session-list-full">
         ${sessions.map((s) => {
-          const diff = s.history?.git?.thisSessionDiff
-            ? ` · ${s.history.git.thisSessionDiff.filesChanged} arch. (+${s.history.git.thisSessionDiff.insertions}/-${s.history.git.thisSessionDiff.deletions})`
+          const d = s.history?.git?.thisSessionDiff;
+          const diff = d
+            ? ` · ${numFmt(d.filesChanged)} arch. (+${numFmt(d.insertions)}/-${numFmt(d.deletions)})`
             : "";
-          return `<li><span class="cu-session-project">${timeAgoFmt(s.timestamp)} — ${s.agent ?? "--"}</span><span class="cu-session-meta">${s.finalState ?? "--"}${diff}${s.backfill ? " · histórico" : ""}</span></li>`;
+          return `<li><span class="cu-session-project">${timeAgoFmt(s.timestamp)} — ${esc(s.agent)}</span><span class="cu-session-meta">${esc(s.finalState)}${diff}${s.backfill ? " · histórico" : ""}</span></li>`;
         }).join("")}
       </ul>`;
 
@@ -1466,6 +1514,10 @@
     document.documentElement.dataset.theme = next;
     localStorage.setItem("dashboard-theme", next);
     themeBtn.textContent = next === "dark" ? "🌙" : "☀️";
+    // Invalida los colores cacheados y obliga a repintar los canvas, que no
+    // se re-estilan solos con CSS.
+    themeColors = null;
+    themeEpoch++;
   });
 
   // --- Fullscreen ---
