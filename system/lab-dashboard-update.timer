@@ -1,13 +1,25 @@
 [Unit]
-Description=Check lab-dashboard repo for Docker updates every 30 minutes
+Description=Check lab-dashboard repo for Docker updates every 2 minutes
 Requires=docker.service
 After=docker.service
 
 [Timer]
+# Cada 2 min: es el camino que hace efectivo "push -> el server se actualiza".
+# El workflow de GitHub Actions daria despliegue inmediato, pero entra por
+# Tailscale SSH, que autentica por ACL del tailnet y no por la deploy key que
+# carga el workflow -- hasta que exista esa regla ACL, este timer es el
+# mecanismo real de despliegue, y 30 min era demasiado para eso.
+#
+# El ciclo en vacio es barato (fetch + comparar HEAD contra .last-built-commit
+# y salir, ~1s): solo construye cuando hay commits nuevos. Y como el service es
+# Type=oneshot, systemd no lanza una segunda corrida mientras la anterior sigue
+# viva, asi que un build largo nunca se solapa consigo mismo.
 OnBootSec=60
-OnUnitActiveSec=30min
-AccuracySec=1min
-RandomizedDelaySec=5min
+OnUnitActiveSec=2min
+AccuracySec=10s
+# Jitter chico para no pegarle a GitHub en el mismo instante desde varios
+# equipos, pero sin diluir el intervalo de 2 min como hacian los 5 min de antes.
+RandomizedDelaySec=20s
 
 [Install]
 WantedBy=timers.target
