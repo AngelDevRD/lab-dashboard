@@ -140,6 +140,8 @@ def disk_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, None
 def docker_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, None, None]:
     if not settings.enable_docker_alerts:
         return
+    if not server.get("monitor_docker", True):
+        return
     docker = server.get("docker", {})
     if not docker.get("available"):
         yield {

@@ -70,6 +70,14 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         or key not in cache
         or now - cache[key][0] >= SLOW_COMMAND_TTLS[key]
     }
+    # Hosts con un stack distinto al Docker estandar del lab (ej. .7, PC de IA
+    # local) declaran su propia lista de servicios en servers.json en vez de
+    # heredar KNOWN_SERVICES -- si no, systemd_rule reporta "caido" para
+    # servicios que nunca existieron ahi (docker, nginx, postgresql, ...) y
+    # nunca se entera de los que si corren (llm-api, llm-runtime, ...).
+    service_names = server.get("services") or config.KNOWN_SERVICES
+    if "services" in commands:
+        commands["services"] = "systemctl is-active " + " ".join(service_names) + " 2>/dev/null"
     results = await conn.run_many(commands)
 
     for key in SLOW_COMMAND_TTLS:
@@ -112,8 +120,9 @@ async def collect_server(server: dict, conn: SSHConnection) -> dict:
         },
         "docker": parsers.parse_docker(out("docker")),
         "docker_disk": parsers.parse_docker_disk(out("docker_disk")),
+        "monitor_docker": server.get("monitor_docker", True),
         "updates_pending": parsers.parse_updates(out("updates")),
-        "services": parsers.parse_services(out("services"), config.KNOWN_SERVICES),
+        "services": parsers.parse_services(out("services"), service_names),
         "power": power,
         "disk_temp": parsers.parse_disk_temp(out("disk_temp")),
         "clock_offset_s": clock_offset_s,

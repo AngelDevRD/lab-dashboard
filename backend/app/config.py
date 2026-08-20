@@ -113,6 +113,13 @@ class ServerConfig(BaseModel):
     host: str = Field(..., min_length=1)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: str = Field(default="ubuntu", min_length=1)
+    # Override de KNOWN_SERVICES para hosts que no corren el stack Docker
+    # estandar del lab (ej. .7, reconvertido a PC de IA local con llama.cpp).
+    services: list[str] | None = None
+    # False para hosts sin Docker instalado/activo a propósito -- evita la
+    # alerta "Docker no disponible" (docker_rule en alerts/rules.py), que
+    # asume Docker como parte esperada del stack.
+    monitor_docker: bool = True
 
 
 # (mtime_ns, size) del archivo ya parseado -> lista validada. El loop de
