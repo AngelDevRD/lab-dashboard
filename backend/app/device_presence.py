@@ -22,12 +22,46 @@ si vale la pena ese trade-off.
 """
 
 import asyncio
+import json
 import logging
 import platform
 import re
 import subprocess
 
+from . import config
+
 logger = logging.getLogger("dashboard")
+
+# host_id -> ultima IP confirmada. Persistido en disco (ver config.py) para
+# sobrevivir reinicios/redeploys -- sin esto, cada redeploy del timer de
+# auto-actualizacion (corre cada 2 min) volveria a perder el fallback y
+# dejaria "offline" a cualquier dispositivo sin trafico ARP reciente hasta
+# que, por azar, generara trafico hacia este host de nuevo.
+_last_ip_state: dict[str, str] = {}
+_last_ip_loaded = False
+
+
+def _load_last_ips() -> None:
+    global _last_ip_state, _last_ip_loaded
+    _last_ip_loaded = True
+    path = config.DEVICE_LAST_IP_FILE
+    if not path.exists():
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            _last_ip_state = json.load(f)
+    except Exception:
+        logger.exception("Failed to read device last-IP state from %s", path)
+        _last_ip_state = {}
+
+
+def _save_last_ips() -> None:
+    path = config.DEVICE_LAST_IP_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(_last_ip_state, f)
+    tmp.replace(path)
 
 _MAC = r"([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})"
 _IP = r"(\d{1,3}(?:\.\d{1,3}){3})"
@@ -108,32 +142,58 @@ def _ping(ip: str, timeout_seconds: float = 1.0) -> bool:
 
 
 def is_device_online(
-    mac: str, timeout_seconds: float = 1.0, arp_table: dict[str, str] | None = None
+    mac: str,
+    timeout_seconds: float = 1.0,
+    arp_table: dict[str, str] | None = None,
+    fallback_ip: str | None = None,
 ) -> tuple[bool, str | None]:
-    """(online, ip_resuelta). Sin entrada ARP -> offline sin pingear (no hay
-    a que pingear). Con entrada ARP pero sin respuesta -> offline igual: la
-    entrada puede estar vieja/cacheada de cuando el dispositivo si estaba
-    prendido."""
+    """(online, ip_resuelta).
+
+    Una entrada ARP solo existe si el propio host tuvo trafico IP reciente
+    con ese vecino -- un dispositivo puede estar perfectamente prendido y
+    conectado a la LAN sin que ESTE host en particular le haya hablado nunca
+    (confirmado en angel1: MACs completamente ausentes de `ip neigh show`,
+    ni siquiera como entrada vieja/FAILED, para dispositivos que si estaban
+    encendidos). Un ping broadcast a la subred no sirve de forzador: Android
+    moderno no responde ICMP a broadcast por bateria/seguridad (probado).
+
+    Por eso, sin entrada ARP, se intenta un ping directo a la ultima IP
+    conocida de ese dispositivo (persistida entre ciclos por el caller): el
+    ping mismo dispara la resolucion ARP como efecto de lado del kernel al
+    enviar el paquete, y si el dispositivo sigue en esa IP (lo mas probable,
+    los leases DHCP no cambian tan seguido) queda confirmado. Sin entrada ARP
+    y sin IP previa conocida -> offline (nunca se vio a este dispositivo
+    desde este host, no hay a que pingear)."""
     ip = resolve_ip_by_mac(mac, arp_table)
-    if ip is None:
-        return False, None
-    return _ping(ip, timeout_seconds), ip
+    if ip is not None:
+        return _ping(ip, timeout_seconds), ip
+    if fallback_ip is not None:
+        return _ping(fallback_ip, timeout_seconds), fallback_ip
+    return False, None
 
 
 async def check_all(devices: list[dict], timeout_seconds: float = 1.0) -> list[dict]:
     """Chequea los dispositivos configurados. Un solo arp/ip-neigh compartido
     entre todos, y los pings (subprocess bloqueante) corren en threads del
     executor por defecto para no trabar el loop de asyncio del monitor."""
+    if not _last_ip_loaded:
+        _load_last_ips()
     loop = asyncio.get_running_loop()
     arp_table = await loop.run_in_executor(None, get_arp_table)
+    changed = False
 
     async def _check(d: dict) -> dict:
+        nonlocal changed
         mac = d.get("mac")
         if not mac:
             return {"id": d["id"], "name": d["name"], "status": "unknown", "ip": None, "mac": None}
+        fallback_ip = _last_ip_state.get(d["id"])
         online, ip = await loop.run_in_executor(
-            None, is_device_online, mac, timeout_seconds, arp_table
+            None, is_device_online, mac, timeout_seconds, arp_table, fallback_ip
         )
+        if online and ip and _last_ip_state.get(d["id"]) != ip:
+            _last_ip_state[d["id"]] = ip
+            changed = True
         return {
             "id": d["id"],
             "name": d["name"],
@@ -142,4 +202,7 @@ async def check_all(devices: list[dict], timeout_seconds: float = 1.0) -> list[d
             "mac": mac,
         }
 
-    return list(await asyncio.gather(*(_check(d) for d in devices)))
+    results = list(await asyncio.gather(*(_check(d) for d in devices)))
+    if changed:
+        await loop.run_in_executor(None, _save_last_ips)
+    return results

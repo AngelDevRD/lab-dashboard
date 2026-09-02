@@ -19,6 +19,14 @@ DEVICES_FILE = Path(os.getenv("DEVICES_FILE", BASE_DIR / "devices.json"))
 # device_presence.py) -- corto a proposito: son 4 hosts en la misma LAN, no
 # hace falta esperar de mas por uno que no responde.
 DEVICE_PING_TIMEOUT = float(os.getenv("DEVICE_PING_TIMEOUT", "1"))
+# Ultima IP confirmada por dispositivo, persistida para sobrevivir reinicios
+# del backend (ver device_presence.py) -- una MAC puede no tener entrada ARP
+# en este host simplemente por falta de trafico reciente, no porque el
+# dispositivo este apagado; sin esto, cada redeploy del timer perderia la
+# unica pista que permite seguir encontrandolo.
+DEVICE_LAST_IP_FILE = Path(
+    os.getenv("DEVICE_LAST_IP_FILE", str(BASE_DIR / "data" / "device_last_ip.json"))
+)
 SSH_KEY_PATH = os.getenv("SSH_KEY_PATH", str(Path.home() / ".ssh" / "id_ed25519"))
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "3"))
 HISTORY_LEN = int(os.getenv("HISTORY_LEN", "40"))
