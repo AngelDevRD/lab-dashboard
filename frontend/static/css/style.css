@@ -433,13 +433,16 @@ main {
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 18px;
 }
 .device-row {
   display: flex;
   align-items: center;
-  gap: 6px;
   font-size: 0.82rem;
+  /* margin, no gap: el WebView de las tablets viejas (ej. Galaxy Tab 4 /
+     Android 4.4) no soporta `gap` en flexbox -- sin esto, los 4 dispositivos
+     quedaban pegados sin ningun espacio entre si (confirmado con captura
+     real via adb screencap). margin funciona en cualquier navegador. */
+  margin: 3px 18px 3px 0;
 }
 .device-dot {
   width: 8px;
@@ -447,12 +450,13 @@ main {
   border-radius: 50%;
   flex: 0 0 auto;
   background: var(--text-2);
+  margin-right: 6px;
 }
 .device-dot.online { background: var(--ok); box-shadow: 0 0 6px rgba(52,211,153,.7); }
 .device-dot.offline { background: var(--bad); }
 .device-dot.warn { background: var(--warn); }
 .device-dot.unknown { background: var(--text-2); opacity: .5; }
-.device-row-name { font-weight: 600; }
+.device-row-name { font-weight: 600; margin-right: 6px; }
 .device-row-meta { font-size: 0.68rem; color: var(--text-2); }
 
 /* ===================== Event log ===================== */
