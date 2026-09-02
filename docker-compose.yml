@@ -37,8 +37,24 @@ services:
     # lo (ver `ip route get 192.168.100.8`) y esquiva UFW, asi que un 200 local
     # NO prueba que se llegue desde la LAN. Verificar con un cliente real o
     # mirando /var/log/nginx/access.log.
-    ports:
-      - "127.0.0.1:8600:8600"
+    #
+    # network_mode: host (2026-09, ver device_presence.py) en vez del ports:
+    # + bridge de antes: el detector de dispositivos Companion/ADB necesita
+    # `ip neigh`/`arp -n` reales de la LAN (192.168.100.0/24), y la red bridge
+    # por defecto de Docker solo expone la red virtual interna del daemon
+    # (172.x), donde esas MACs nunca van a aparecer.
+    #
+    # La exposicion externa NO cambia con este switch: uvicorn sigue bindeado
+    # a 127.0.0.1:8600 (ver Dockerfile), y con red host el 127.0.0.1 del
+    # contenedor ES el 127.0.0.1 del host -- exactamente lo que nginx ya
+    # proxea hoy. `ports:` se elimina porque no aplica bajo network_mode:
+    # host (Docker lo ignora/rechaza).
+    network_mode: host
+    # Requerido para que `ping` (iputils-ping, ver Dockerfile) funcione sin
+    # root dentro del contenedor: abre sockets ICMP crudos. No es
+    # NET_ADMIN -- no permite tocar rutas/interfaces, solo enviar/recibir ICMP.
+    cap_add:
+      - NET_RAW
     # Techos, no reservas. Uso real observado: 52 MB.
     mem_limit: 384m
     pids_limit: 256
@@ -48,6 +64,7 @@ services:
       - SSH_KEY_PATH=/app/.ssh/id_ed25519
     volumes:
       - ./backend/servers.json:/app/servers.json
+      - ./backend/devices.json:/app/devices.json
       - ./logs:/logs
       - ./config/ssh:/app/.ssh:ro
       - ./config:/config:ro

@@ -3,6 +3,7 @@
   "token": "REEMPLAZAR_CON_EL_MISMO_VALOR_DE_CLAUDE_USAGE_REPORT_TOKEN_EN_EL_.env_DEL_SERVIDOR",
   "source": "pc-angel",
   "ccusage_package": "ccusage@20.0.18",
+  "ccusage_timeout_sec": 90,
   "log_file": "./report.log",
   "log_max_bytes": 2097152
 }

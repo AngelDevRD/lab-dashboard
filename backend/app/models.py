@@ -168,6 +168,7 @@ class ServerStatus(BaseModel):
     history: ServerHistory | None = None
     confidence: dict[str, ConfidenceEntry] = {}
     telemetry_health: TelemetryHealth | None = None
+    ai: dict | None = None
 
 
 class StatusResponse(BaseModel):
@@ -175,6 +176,7 @@ class StatusResponse(BaseModel):
 
     servers: list[ServerStatus]
     connectivity: list[dict] = []
+    devices: list[dict] = []
     internet: dict
     summary: dict
     events: list[dict]

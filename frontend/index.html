@@ -42,10 +42,26 @@
       <div id="connectivity-grid" class="connectivity-grid"></div>
     </section>
 
+    <section class="card devices-card hidden" id="devices-card">
+      <div class="card-header">
+        <h2>Dispositivos</h2>
+      </div>
+      <ul id="devices-list" class="devices-list"></ul>
+    </section>
+
+    <template id="device-row-template">
+      <li class="device-row">
+        <span class="device-dot"></span>
+        <span class="device-row-name">--</span>
+        <span class="device-row-meta">--</span>
+      </li>
+    </template>
+
     <section id="server-grid" class="server-grid">
       <article class="card server-card skeleton"></article>
       <article class="card server-card skeleton"></article>
     </section>
+    <p id="servers-empty-state" class="empty-state hidden">No hay servidores disponibles</p>
 
     <section class="card log-card collapsed" id="log-card">
       <div class="card-header" id="log-toggle">
@@ -246,6 +262,87 @@
         <span class="uptime">--</span>
         <span class="latency">--</span>
         <span class="wifi-ping">--</span>
+      </div>
+    </article>
+  </template>
+
+  <template id="ai-server-card-template">
+    <article class="card server-card ai-server-card">
+      <div class="card-header">
+        <div class="server-title">
+          <span class="status-dot"></span>
+          <h2 class="server-name">--</h2>
+          <span class="ai-badge" title="Servidor de IA local">🤖</span>
+        </div>
+        <span class="status-text">--</span>
+      </div>
+
+      <div class="ai-body">
+        <div class="ai-system-col">
+          <div class="ai-system-label">Sistema</div>
+          <div class="ai-mini-metric">
+            <span class="ai-mini-label">CPU</span>
+            <div class="bar ai-mini-bar"><div class="bar-fill cpu-bar"></div></div>
+            <span class="ai-mini-value cpu-percent">--%</span>
+          </div>
+          <div class="ai-mini-metric">
+            <span class="ai-mini-label">RAM</span>
+            <div class="bar ai-mini-bar"><div class="bar-fill mem-bar"></div></div>
+            <span class="ai-mini-value mem-percent">--%</span>
+          </div>
+          <div class="ai-mini-metric">
+            <span class="ai-mini-label">Disco</span>
+            <div class="bar ai-mini-bar"><div class="bar-fill disk-bar"></div></div>
+            <span class="ai-mini-value disk-percent">--%</span>
+          </div>
+          <div class="ai-system-row">
+            <span>Temp <b class="cpu-temp">--</b></span>
+            <span>Uptime <b class="uptime">--</b></span>
+          </div>
+          <div class="ai-system-row ai-cpu-freq-warning hidden">
+            <span class="ai-warning-text">--</span>
+          </div>
+        </div>
+
+        <div class="ai-brain-col">
+          <div class="ai-status-lines">
+            <div class="ai-status-row">
+              <span>SERVIDOR</span>
+              <span class="ai-status-pill server-status-pill">--</span>
+            </div>
+            <div class="ai-status-row">
+              <span>IA API</span>
+              <span class="ai-status-pill ai-api-status-pill">--</span>
+            </div>
+            <div class="ai-status-row">
+              <span>MODELO</span>
+              <span class="ai-status-pill ai-model-status-pill">--</span>
+            </div>
+          </div>
+
+          <div class="ai-model-block">
+            <div class="ai-section-label">Modelo activo</div>
+            <div class="ai-model-name">--</div>
+            <div class="ai-models-extra">--</div>
+          </div>
+
+          <div class="ai-tokens-block">
+            <div class="ai-section-label">Última inferencia</div>
+            <div class="ai-token-row">
+              <span>Entrada</span><b class="ai-tokens-in">--</b>
+            </div>
+            <div class="ai-token-row">
+              <span>Salida</span><b class="ai-tokens-out">--</b>
+            </div>
+            <div class="ai-token-row">
+              <span>Velocidad</span><b class="ai-tokens-speed">--</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <span class="latency">--</span>
       </div>
     </article>
   </template>

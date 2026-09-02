@@ -11,6 +11,14 @@ logger = logging.getLogger("dashboard")
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 SERVERS_FILE = Path(os.getenv("SERVERS_FILE", BASE_DIR / "servers.json"))
+# Dispositivos Companion/ADB (tablets, telefonos) -- ver collectors/devices.py.
+# Mismo patron que SERVERS_FILE: identidad estable en un JSON versionado,
+# separado de como se los verifica (que vive en el collector).
+DEVICES_FILE = Path(os.getenv("DEVICES_FILE", BASE_DIR / "devices.json"))
+# Timeout del ping ICMP usado para confirmar una entrada ARP (ver
+# device_presence.py) -- corto a proposito: son 4 hosts en la misma LAN, no
+# hace falta esperar de mas por uno que no responde.
+DEVICE_PING_TIMEOUT = float(os.getenv("DEVICE_PING_TIMEOUT", "1"))
 SSH_KEY_PATH = os.getenv("SSH_KEY_PATH", str(Path.home() / ".ssh" / "id_ed25519"))
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "3"))
 HISTORY_LEN = int(os.getenv("HISTORY_LEN", "40"))
@@ -54,6 +62,12 @@ LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 NETWORK_REPORT_TOKEN = os.getenv("NETWORK_REPORT_TOKEN", "")
 NETWORK_DEVICE_STALE_SEC = float(os.getenv("NETWORK_DEVICE_STALE_SEC", "60"))
+
+# API key del servidor de IA local (llm-api en Servidor 2, ver
+# collectors/ai_local.py). Un solo servidor la usa hoy -- si en el futuro hay
+# mas de uno, se puede versionar por host recien ahi.
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_API_TIMEOUT = float(os.getenv("AI_API_TIMEOUT", "3"))
 
 FRAMEWORK_TELEMETRY_TOKEN = os.getenv("FRAMEWORK_TELEMETRY_TOKEN", "")
 FRAMEWORK_TELEMETRY_FILE = Path(
@@ -120,6 +134,9 @@ class ServerConfig(BaseModel):
     # alerta "Docker no disponible" (docker_rule en alerts/rules.py), que
     # asume Docker como parte esperada del stack.
     monitor_docker: bool = True
+    # URL base de la API local de IA (llm-api, FastAPI en :8000) para hosts
+    # dedicados a inferencia -- ver collectors/ai_local.py. None = host normal.
+    ai_api_url: str | None = None
 
 
 # (mtime_ns, size) del archivo ya parseado -> lista validada. El loop de
@@ -155,3 +172,49 @@ def load_servers() -> list[dict]:
         return []
     _servers_cache = (stamp, servers)
     return servers
+
+
+class DeviceConfig(BaseModel):
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    # MAC Wi-Fi para resolver la IP actual via tabla ARP (ver
+    # app/device_presence.py) -- estos dispositivos reciben IP por DHCP, asi
+    # que la IP sola no es una identidad estable, la MAC si.
+    mac: str | None = None
+    # "factory" (MAC real de fabrica, siempre estable) vs "private_per_network"
+    # (MAC aleatoria por red de Android 11+, valida mientras el dispositivo no
+    # "olvide" esa red Wi-Fi). Solo informativo, no cambia la logica.
+    mac_type: str | None = None
+    mac_note: str | None = None
+
+
+_devices_cache: tuple[tuple, list[dict]] | None = None
+
+
+def _read_devices() -> list[dict]:
+    with open(DEVICES_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    validated = [DeviceConfig(**d) for d in data.get("devices", [])]
+    return [d.model_dump() for d in validated]
+
+
+def load_devices() -> list[dict]:
+    """Mismo patron de cache que load_servers(): releer solo si el archivo
+    cambio en disco."""
+    global _devices_cache
+    try:
+        stat = DEVICES_FILE.stat()
+    except OSError:
+        _devices_cache = None
+        return []
+    stamp = (str(DEVICES_FILE), stat.st_mtime_ns, stat.st_size)
+    if _devices_cache is not None and _devices_cache[0] == stamp:
+        return _devices_cache[1]
+    try:
+        devices = _read_devices()
+    except Exception as exc:
+        logger.error("Error loading %s: %s", DEVICES_FILE, exc)
+        _devices_cache = None
+        return []
+    _devices_cache = (stamp, devices)
+    return devices

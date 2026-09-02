@@ -5,9 +5,9 @@ import time
 from collections import deque
 from datetime import date
 
-from . import config, events
+from . import config, device_presence, events
 from .alerts.service import notification_service
-from .collectors import autonomy, confidence, energy
+from .collectors import ai_local, autonomy, confidence, energy
 from .collectors.collector import collect_internet, collect_server
 from .ssh_client import pool
 
@@ -70,6 +70,9 @@ class Monitor:
         self._task: asyncio.Task | None = None
         self._running = False
         self._pushed_devices: dict[str, dict] = {}
+        self.devices_status: list[dict] = []
+        self._device_prev_online: dict[str, bool] = {}
+        self._device_last_seen: dict[str, float] = {}
         # snapshot() corre autonomy.estimate + confidence.for_server + copias de
         # histórico por servidor. Antes se recalculaba entero en cada broadcast
         # (BROADCAST_INTERVAL) y en cada GET /api/status -- o sea varias veces
@@ -108,6 +111,15 @@ class Monitor:
         if snapshot.get("online"):
             self._apply_daily_traffic(server["host"], snapshot)
             self._record_history(server["host"], snapshot)
+            ai_api_url = server.get("ai_api_url")
+            if ai_api_url:
+                try:
+                    snapshot["ai"] = await ai_local.collect(
+                        server["host"], ai_api_url, config.AI_API_KEY, config.AI_API_TIMEOUT
+                    )
+                except Exception:
+                    logger.exception("ai_local collector crashed for %s", server["host"])
+                    snapshot["ai"] = {"reachable": False}
         self.servers_status[server["host"]] = snapshot
 
         was_online = self._prev_online.get(server["host"])
@@ -250,6 +262,31 @@ class Monitor:
                 self.internet_down_since = time.time()
                 events.log_event("internet_down", "Sin conexión a internet")
 
+    async def _poll_devices(self) -> None:
+        devices_cfg = config.load_devices()
+        if not devices_cfg:
+            self.devices_status = []
+            return
+        try:
+            results = await device_presence.check_all(devices_cfg, config.DEVICE_PING_TIMEOUT)
+        except Exception:
+            logger.exception("device_presence check crashed, continuing")
+            return
+        now = time.time()
+        for d in results:
+            is_online = d["status"] == "online"
+            if is_online:
+                self._device_last_seen[d["id"]] = now
+            was_online = self._device_prev_online.get(d["id"])
+            if was_online is not None and was_online != is_online:
+                if is_online:
+                    events.log_event("device_up", f"{d['name']} volvió a estar online", host=d["id"])
+                else:
+                    events.log_event("device_down", f"{d['name']} dejó de responder", host=d["id"])
+            self._device_prev_online[d["id"]] = is_online
+            d["last_seen"] = self._device_last_seen.get(d["id"])
+        self.devices_status = results
+
     async def _loop(self) -> None:
         while self._running:
             try:
@@ -257,6 +294,7 @@ class Monitor:
                 self._server_order = [s["host"] for s in servers]
                 await asyncio.gather(*(self._poll_server(s) for s in servers))
                 await self._poll_internet(servers)
+                await self._poll_devices()
             except Exception:
                 # A single bad cycle must never kill the whole background loop —
                 # that would freeze every server's data forever with no visible
@@ -322,10 +360,21 @@ class Monitor:
     def _build_snapshot(self) -> dict:
         ordered_hosts = self._server_order or list(self.servers_status.keys())
         servers = []
+        total = 0
         for h in ordered_hosts:
             if h not in self.servers_status:
                 continue
-            s = dict(self.servers_status[h])
+            total += 1
+            raw = self.servers_status[h]
+            # Un servidor offline no tiene métricas que enriquecer (autonomy,
+            # confidence, historial) -- calcularlas igual sería trabajo tirado
+            # y, más importante, el frontend ya no debe mostrar su card (ver
+            # punto "solo servidores activos"): un host apagado simplemente no
+            # entra a la lista que se expone, en vez de aparecer con métricas
+            # en cero o vacías.
+            if not raw.get("online"):
+                continue
+            s = dict(raw)
             s["history"] = {
                 "cpu": list(self._cpu_history.get(h, [])),
                 "mem": list(self._mem_history.get(h, [])),
@@ -386,7 +435,7 @@ class Monitor:
             )
             s["telemetry_health"] = confidence.telemetry_health(s["confidence"])
             servers.append(s)
-        online_count = sum(1 for s in servers if s.get("online"))
+        online_count = len(servers)
         return {
             "servers": servers,
             "connectivity": self._connectivity_snapshot(servers),
@@ -396,10 +445,11 @@ class Monitor:
                 "last_outage": self.internet_last_outage,
             },
             "summary": {
-                "total": len(servers),
+                "total": total,
                 "online": online_count,
-                "offline": len(servers) - online_count,
+                "offline": total - online_count,
             },
+            "devices": self.devices_status,
             "events": events.recent_events(20),
             "alerts": notification_service.get_alerts_for_snapshot(),
             "alert_count": notification_service.get_active_alerts_count(),

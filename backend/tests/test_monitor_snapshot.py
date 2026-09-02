@@ -94,7 +94,10 @@ def test_snapshot_reflects_frozen_cpu_history():
     assert conf["cpu"]["score"] < 98
 
 
-def test_snapshot_offline_server_has_no_confidence_block_crash():
+def test_snapshot_offline_server_is_excluded_but_does_not_crash():
+    """Un servidor offline no debe crashear el snapshot (no tiene cpu/mem/power
+    para enriquecer con confidence/autonomy), y tampoco debe aparecer en la
+    lista expuesta -- solo se muestran servidores activos, ver monitor.py."""
     monitor = Monitor()
     monitor._server_order = [HOST]
     monitor.servers_status[HOST] = {
@@ -102,10 +105,8 @@ def test_snapshot_offline_server_has_no_confidence_block_crash():
         "last_update": 1_800_000_000.0, "error": "timeout",
     }
     result = monitor.snapshot()
-    server = result["servers"][0]
-    assert server["online"] is False
-    # No debe explotar aunque el snapshot offline no tenga cpu/mem/power.
-    assert "confidence" in server
+    assert result["servers"] == []
+    assert result["summary"] == {"total": 1, "online": 0, "offline": 1}
 
 
 def test_snapshot_validated_autonomy_after_complete_discharge():

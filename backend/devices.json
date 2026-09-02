@@ -1,0 +1,30 @@
+{
+  "devices": [
+    {
+      "id": "tablet-small",
+      "name": "Tablet chica",
+      "mac": "3c:bb:fd:c1:1a:e5",
+      "mac_type": "factory"
+    },
+    {
+      "id": "tablet-large",
+      "name": "Tablet grande",
+      "mac": "fa:2c:a4:98:61:64",
+      "mac_type": "private_per_network",
+      "mac_note": "MAC privada aleatoria de Android 11 para esta red Wi-Fi. Si el dispositivo 'olvida' la red o Android le rota la MAC privada, hay que volver a auditarla (Ajustes > Wi-Fi > red > Privacidad > ver MAC)."
+    },
+    {
+      "id": "g3",
+      "name": "G3",
+      "mac": "24:da:9b:14:a4:ca",
+      "mac_type": "factory"
+    },
+    {
+      "id": "a12",
+      "name": "A12",
+      "mac": "be:af:5b:01:3b:e3",
+      "mac_type": "private_per_network",
+      "mac_note": "MAC privada aleatoria de Android 12 para esta red Wi-Fi. Mismo caso que tablet-large: reauditar si se resetea."
+    }
+  ]
+}

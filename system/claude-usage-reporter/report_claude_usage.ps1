@@ -43,11 +43,36 @@ function Write-Log {
 function Get-CcusageReport {
     param([string]$Period)
     $pkg = if ($config.ccusage_package) { $config.ccusage_package } else { "ccusage@20.0.18" }
-    $raw = & npx $pkg claude $Period --json 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $raw) {
-        throw "ccusage fallo para el periodo '$Period' (exit=$LASTEXITCODE)"
+    $timeoutSec = if ($config.ccusage_timeout_sec) { $config.ccusage_timeout_sec } else { 90 }
+
+    # npx no tenia ningun timeout: si se cuelga (registry npm lento/no
+    # alcanzable, resolucion de version, lock de cache), el proceso quedaba
+    # vivo indefinidamente. Con ExecutionTimeLimit=72h en la tarea programada
+    # y MultipleInstances=IgnoreNew, un solo colgue bloqueaba en silencio
+    # TODAS las corridas siguientes durante dias (confirmado en report.log:
+    # "Iniciando recoleccion" sin ninguna linea despues, y
+    # NumberOfMissedRuns > 0 en Get-ScheduledTaskInfo). Correr en un Job y
+    # matarlo si excede $timeoutSec convierte ese cuelgue silencioso en un
+    # error logueado normal, que no bloquea las siguientes ejecuciones.
+    $job = Start-Job -ScriptBlock {
+        param($pkg, $Period)
+        $out = & npx $pkg claude $Period --json 2>$null
+        [PSCustomObject]@{ Output = ($out -join "`n"); ExitCode = $LASTEXITCODE }
+    } -ArgumentList $pkg, $Period
+
+    try {
+        if (-not (Wait-Job -Job $job -Timeout $timeoutSec)) {
+            throw "ccusage colgado para el periodo '$Period' (timeout ${timeoutSec}s) -- npx no respondio a tiempo"
+        }
+        $result = Receive-Job -Job $job
+        if ($result.ExitCode -ne 0 -or -not $result.Output) {
+            throw "ccusage fallo para el periodo '$Period' (exit=$($result.ExitCode))"
+        }
+        return ($result.Output | ConvertFrom-Json)
+    } finally {
+        Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
     }
-    return ($raw -join "`n" | ConvertFrom-Json)
 }
 
 function Send-Report {

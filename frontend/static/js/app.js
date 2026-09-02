@@ -3,10 +3,16 @@
 
   const grid = document.getElementById("server-grid");
   const template = document.getElementById("server-card-template");
+  const aiTemplate = document.getElementById("ai-server-card-template");
+  const serversEmptyState = document.getElementById("servers-empty-state");
   const cards = new Map();
   const connectivityGrid = document.getElementById("connectivity-grid");
   const connectivityTemplate = document.getElementById("connectivity-card-template");
   const connectivityCards = new Map();
+  const devicesCard = document.getElementById("devices-card");
+  const devicesList = document.getElementById("devices-list");
+  const deviceRowTemplate = document.getElementById("device-row-template");
+  const deviceRows = new Map();
   const prevOnline = new Map();
   const autoState = new Map();
   let selectedHost = null;
@@ -177,47 +183,81 @@
 
   function statusLevel(s) {
     if (!s.online) return "red";
+    if (s.ai && s.ai.reachable !== false && s.ai.runtime_status !== "online") return "yellow";
+    if (s.ai && s.ai.reachable === false) return "yellow";
     const pct = [s.cpu?.percent, s.mem?.percent, s.disk?.percent].filter((v) => v != null);
     if (pct.some((v) => v >= 90)) return "red";
     if (pct.some((v) => v >= 70)) return "yellow";
     return "green";
   }
 
-  function ensureCard(host) {
+  function ensureCard(host, isAi) {
     if (cards.has(host)) return cards.get(host);
-    const el = template.content.firstElementChild.cloneNode(true);
+    const tpl = isAi ? aiTemplate : template;
+    const el = tpl.content.firstElementChild.cloneNode(true);
     el.dataset.host = host;
     el.addEventListener("click", () => openDetail(host));
     grid.appendChild(el);
 
-    const refs = {
-      el: {
-        name: el.querySelector(".server-name"),
-        dot: el.querySelector(".status-dot"),
-        statusText: el.querySelector(".status-text"),
-        cpu: el.querySelector(".cpu-percent"),
-        mem: el.querySelector(".mem-percent"),
-        disk: el.querySelector(".disk-percent"),
-        cpuBar: el.querySelector(".cpu-bar"),
-        memBar: el.querySelector(".mem-bar"),
-        diskBar: el.querySelector(".disk-bar"),
-        temp: el.querySelector(".cpu-temp"),
-        power: el.querySelector(".power-value"),
-        powerWatts: el.querySelector(".power-watts"),
-        energyKwh: el.querySelector(".energy-kwh"),
-        docker: el.querySelector(".docker-summary"),
-        hdrDocker: el.querySelector(".hdr-docker"),
-        hdrBattery: el.querySelector(".hdr-battery"),
-        uptime: el.querySelector(".uptime"),
-        latency: el.querySelector(".latency"),
-        wifiNetwork: el.querySelector(".wifi-network"),
-        wifiPing: el.querySelector(".wifi-ping"),
-        autonomy: el.querySelector(".autonomy-value"),
-        sparkline: el.querySelector(".sparkline"),
-      },
-      last: {},
-      card: el,
-    };
+    const refs = isAi
+      ? {
+          isAi: true,
+          el: {
+            name: el.querySelector(".server-name"),
+            dot: el.querySelector(".status-dot"),
+            statusText: el.querySelector(".status-text"),
+            cpu: el.querySelector(".cpu-percent"),
+            mem: el.querySelector(".mem-percent"),
+            disk: el.querySelector(".disk-percent"),
+            cpuBar: el.querySelector(".cpu-bar"),
+            memBar: el.querySelector(".mem-bar"),
+            diskBar: el.querySelector(".disk-bar"),
+            temp: el.querySelector(".cpu-temp"),
+            uptime: el.querySelector(".uptime"),
+            latency: el.querySelector(".latency"),
+            cpuFreqWarningRow: el.querySelector(".ai-cpu-freq-warning"),
+            cpuFreqWarningText: el.querySelector(".ai-warning-text"),
+            serverStatusPill: el.querySelector(".server-status-pill"),
+            aiApiStatusPill: el.querySelector(".ai-api-status-pill"),
+            aiModelStatusPill: el.querySelector(".ai-model-status-pill"),
+            modelName: el.querySelector(".ai-model-name"),
+            modelsExtra: el.querySelector(".ai-models-extra"),
+            tokensIn: el.querySelector(".ai-tokens-in"),
+            tokensOut: el.querySelector(".ai-tokens-out"),
+            tokensSpeed: el.querySelector(".ai-tokens-speed"),
+          },
+          last: {},
+          card: el,
+        }
+      : {
+          isAi: false,
+          el: {
+            name: el.querySelector(".server-name"),
+            dot: el.querySelector(".status-dot"),
+            statusText: el.querySelector(".status-text"),
+            cpu: el.querySelector(".cpu-percent"),
+            mem: el.querySelector(".mem-percent"),
+            disk: el.querySelector(".disk-percent"),
+            cpuBar: el.querySelector(".cpu-bar"),
+            memBar: el.querySelector(".mem-bar"),
+            diskBar: el.querySelector(".disk-bar"),
+            temp: el.querySelector(".cpu-temp"),
+            power: el.querySelector(".power-value"),
+            powerWatts: el.querySelector(".power-watts"),
+            energyKwh: el.querySelector(".energy-kwh"),
+            docker: el.querySelector(".docker-summary"),
+            hdrDocker: el.querySelector(".hdr-docker"),
+            hdrBattery: el.querySelector(".hdr-battery"),
+            uptime: el.querySelector(".uptime"),
+            latency: el.querySelector(".latency"),
+            wifiNetwork: el.querySelector(".wifi-network"),
+            wifiPing: el.querySelector(".wifi-ping"),
+            autonomy: el.querySelector(".autonomy-value"),
+            sparkline: el.querySelector(".sparkline"),
+          },
+          last: {},
+          card: el,
+        };
     cards.set(host, refs);
     return refs;
   }
@@ -233,9 +273,87 @@
     }
   }
 
+  function fmtTokens(n) {
+    if (n == null) return "--";
+    if (n < 1000) return `${n}`;
+    return `${(n / 1000).toFixed(1)}K`;
+  }
+
+  function setPill(refs, key, state, textOn, textOff) {
+    // state: true = ok (verde), false = mal (rojo), null = desconocido/gris.
+    const text = state === true ? textOn : state === false ? textOff : "--";
+    const cls = state === true ? "ai-status-pill ok" : state === false ? "ai-status-pill bad" : "ai-status-pill";
+    if (refs.last[key] === text) return;
+    refs.last[key] = text;
+    refs.el[key].textContent = text;
+    refs.el[key].className = cls;
+  }
+
+  function renderAiServer(s, refs, level) {
+    const dotClass = level === "green" ? "online" : "warn";
+    const dotTarget = `status-dot ${dotClass}`;
+    if (refs.last.dot !== dotTarget) {
+      refs.el.dot.className = dotTarget;
+      refs.last.dot = dotTarget;
+    }
+    setStatusText(refs.el.statusText, true, level);
+
+    const cpuPct = s.cpu?.percent ?? 0;
+    const memPct = s.mem?.percent ?? 0;
+    const diskPct = s.disk?.percent ?? 0;
+    setText(refs, "cpu", `${cpuPct}%`);
+    setText(refs, "mem", `${memPct}%`);
+    setText(refs, "disk", `${diskPct}%`);
+    setBar(refs, "cpuBar", cpuPct);
+    setBar(refs, "memBar", memPct);
+    setBar(refs, "diskBar", diskPct);
+    setText(refs, "temp", s.cpu?.temp != null ? `${s.cpu.temp}°C` : "--");
+    setText(refs, "uptime", s.uptime?.pretty || "--");
+    setText(refs, "latency", s.latency_ms != null ? `SSH ${s.latency_ms} ms` : "");
+
+    const ai = s.ai || { reachable: false };
+    const reachable = ai.reachable === true;
+    const modelLoaded = reachable ? ai.model_loaded === true : null;
+
+    setPill(refs, "serverStatusPill", true, "ONLINE", "OFFLINE");
+    setPill(refs, "aiApiStatusPill", reachable ? true : false, "ONLINE", "OFFLINE");
+    setPill(refs, "aiModelStatusPill", reachable ? modelLoaded : null, "CARGADO", "SIN CARGAR");
+
+    const warnMhz = reachable && ai.cpu_freq_warning;
+    setBadge(refs, "cpuFreqWarningRow", !!warnMhz);
+    if (warnMhz && refs.last.cpuFreqWarningText !== ai.cpu_freq_warning_text) {
+      refs.last.cpuFreqWarningText = ai.cpu_freq_warning_text;
+      refs.el.cpuFreqWarningText.textContent = ai.cpu_freq_warning_text || "Límite de hardware detectado";
+    }
+
+    if (!reachable) {
+      setText(refs, "modelName", "IA no disponible");
+      setText(refs, "modelsExtra", "");
+      setText(refs, "tokensIn", "--");
+      setText(refs, "tokensOut", "--");
+      setText(refs, "tokensSpeed", "--");
+      return;
+    }
+
+    setText(refs, "modelName", ai.active_model_label || ai.active_model || "--");
+    const extra = (ai.models_total || 0) - 1;
+    setText(refs, "modelsExtra", extra > 0 ? `+${extra} modelos disponibles` : "");
+
+    const lastReq = ai.last_request;
+    if (lastReq) {
+      setText(refs, "tokensIn", fmtTokens(lastReq.tokens_prompt));
+      setText(refs, "tokensOut", fmtTokens(lastReq.tokens_completion));
+      setText(refs, "tokensSpeed", lastReq.tokens_per_sec != null ? `${lastReq.tokens_per_sec.toFixed(1)} tok/s` : "--");
+    } else {
+      setText(refs, "tokensIn", "Sin datos");
+      setText(refs, "tokensOut", "Sin datos");
+      setText(refs, "tokensSpeed", "--");
+    }
+  }
+
   function renderServer(s) {
     latestServers.set(s.host, s);
-    const refs = ensureCard(s.host);
+    const refs = ensureCard(s.host, !!s.ai);
     const level = statusLevel(s);
     refs.card.classList.toggle("offline", !s.online);
     refs.card.classList.toggle("selected", s.host === selectedHost);
@@ -246,6 +364,13 @@
     }
 
     setText(refs, "name", s.name);
+
+    if (refs.isAi) {
+      renderAiServer(s, refs, level);
+      flagAlert(s, level !== "green");
+      if (s.host === selectedHost) renderDetail(s);
+      return;
+    }
 
     if (!s.online) {
       const offDot = "status-dot offline";
@@ -415,6 +540,53 @@
     const card = document.getElementById("connectivity-card");
     card.classList.toggle("hidden", list.length === 0);
     for (const dev of list) renderConnectivityDevice(dev);
+  }
+
+  function fmtLastSeen(sec) {
+    if (sec == null) return "";
+    if (sec < 5) return "visto ahora";
+    if (sec < 60) return `visto hace ${Math.round(sec)} s`;
+    if (sec < 3600) return `visto hace ${Math.round(sec / 60)} min`;
+    return `visto hace ${Math.round(sec / 3600)} h`;
+  }
+
+  function ensureDeviceRow(id) {
+    if (deviceRows.has(id)) return deviceRows.get(id);
+    const el = deviceRowTemplate.content.firstElementChild.cloneNode(true);
+    devicesList.appendChild(el);
+    const refs = {
+      el: {
+        dot: el.querySelector(".device-dot"),
+        name: el.querySelector(".device-row-name"),
+        meta: el.querySelector(".device-row-meta"),
+      },
+      last: {},
+    };
+    deviceRows.set(id, refs);
+    return refs;
+  }
+
+  // Estados: online/offline/warn (companion caido con ADB ok, etc.) son
+  // lecturas reales una vez conectado el mecanismo de verificacion.
+  // "unknown" es honesto: "todavia no hay forma de verificar este
+  // dispositivo" -- no se muestra como online ni offline sin evidencia.
+  const DEVICE_DOT = { online: "online", offline: "offline", warn: "warn", unknown: "unknown" };
+
+  function renderDevices(deviceList) {
+    const list = deviceList || [];
+    devicesCard.classList.toggle("hidden", list.length === 0);
+    for (const d of list) {
+      const refs = ensureDeviceRow(d.id);
+      const dotClass = `device-dot ${DEVICE_DOT[d.status] || "unknown"}`;
+      if (refs.last.dot !== dotClass) {
+        refs.last.dot = dotClass;
+        refs.el.dot.className = dotClass;
+      }
+      setText(refs, "name", d.name || d.id);
+      const ageSec = d.last_seen != null ? (Date.now() / 1000 - d.last_seen) : null;
+      const meta = d.status === "unknown" ? "sin verificar" : fmtLastSeen(ageSec);
+      setText(refs, "meta", meta);
+    }
   }
 
   function renderProcList(ul, procs, suffix) {
@@ -824,16 +996,34 @@
     renderSummary(data);
     renderInternet(data.internet);
     renderConnectivity(data.connectivity);
+    renderDevices(data.devices);
     latestEvents = data.events || [];
     renderEvents(latestEvents);
     renderAlerts(data.alerts || []);
-    const count = data.servers ? data.servers.length : 0;
+    const servers = data.servers || [];
+    const count = servers.length;
     grid.classList.remove(
       "servers-1", "servers-2", "servers-3",
       "servers-4", "servers-5", "servers-6"
     );
     if (count >= 1 && count <= 6) grid.classList.add(`servers-${count}`);
-    for (const s of data.servers) { try { renderServer(s); } catch (e) { console.error("renderServer failed for", s.host, e); } }
+    const seenHosts = new Set();
+    for (const s of servers) {
+      seenHosts.add(s.host);
+      try { renderServer(s); } catch (e) { console.error("renderServer failed for", s.host, e); }
+    }
+    // Un servidor que se apagó ya no viene en data.servers (ver "solo
+    // servidores activos" en el backend): sacar su card del DOM en vez de
+    // dejarla mostrando el último dato que tuvo antes de apagarse.
+    for (const [host, refs] of cards) {
+      if (seenHosts.has(host)) continue;
+      refs.card.remove();
+      cards.delete(host);
+      latestServers.delete(host);
+      autoState.delete(host);
+      if (host === selectedHost) closeDetail();
+    }
+    serversEmptyState.classList.toggle("hidden", count > 0);
   }
 
   // --- WebSocket with polling fallback ---

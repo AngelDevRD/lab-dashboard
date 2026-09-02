@@ -1,0 +1,8 @@
+{
+  "devices": [
+    { "id": "tablet-small", "name": "Tablet chica", "mac": "aa:bb:cc:dd:ee:01", "mac_type": "factory" },
+    { "id": "tablet-large", "name": "Tablet grande", "mac": "aa:bb:cc:dd:ee:02", "mac_type": "private_per_network" },
+    { "id": "a12", "name": "A12", "mac": "aa:bb:cc:dd:ee:03", "mac_type": "private_per_network" },
+    { "id": "g3", "name": "G3", "mac": "aa:bb:cc:dd:ee:04", "mac_type": "factory" }
+  ]
+}
