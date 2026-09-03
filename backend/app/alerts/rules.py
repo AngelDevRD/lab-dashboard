@@ -226,6 +226,8 @@ def services_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, 
 def power_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, None, None]:
     if not settings.enable_battery_alerts:
         return
+    if not server.get("monitor_battery", True):
+        return
     power = server.get("power", {})
     if not power.get("available"):
         return

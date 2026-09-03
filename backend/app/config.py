@@ -142,6 +142,10 @@ class ServerConfig(BaseModel):
     # alerta "Docker no disponible" (docker_rule en alerts/rules.py), que
     # asume Docker como parte esperada del stack.
     monitor_docker: bool = True
+    # False para hosts sin bateria fisica (ej. .7, PC de escritorio reconvertido) --
+    # evita la alerta "Bateria baja/critica/en emergencia" (power_rule en
+    # alerts/rules.py), que asume bateria como parte esperada del hardware.
+    monitor_battery: bool = True
     # URL base de la API local de IA (llm-api, FastAPI en :8000) para hosts
     # dedicados a inferencia -- ver collectors/ai_local.py. None = host normal.
     ai_api_url: str | None = None
