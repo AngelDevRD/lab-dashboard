@@ -237,12 +237,10 @@ def power_rule(server: dict, settings: ThresholdSettings) -> Generator[dict, Non
     # ningun sensor de potencia detras -- eso no es una emergencia real, es
     # hardware que no funciona. Sin este chequeo, un equipo asi dispara la
     # alerta de "bateria en emergencia" en cada ciclo, para siempre.
-    status_lower = (power.get("status") or "").lower()
-    battery_damaged = (
-        pct == 0
-        and power.get("power_now_w") is None
-        and status_lower in ("not charging", "unknown")
-    )
+    # No se filtra por texto de "status": el firmware roto puede reportar
+    # "Discharging", "Not charging" o "Unknown" indistintamente -- la senal
+    # real de bateria danada es que no hay ninguna lectura de potencia.
+    battery_damaged = pct == 0 and power.get("power_now_w") is None
     if battery_damaged:
         return
     if pct <= settings.battery_emergency:
