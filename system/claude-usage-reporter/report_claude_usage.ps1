@@ -75,10 +75,51 @@ function Get-CcusageReport {
     }
 }
 
+# Claude Code guarda cada carpeta de trabajo aparte en ~/.claude/projects con
+# el path codificado (los "\" y "-" quedan iguales, asi que no se puede
+# decodificar). Un proyecto movido de carpeta aparece como dos entradas
+# distintas. Este mapa da, por carpeta, el cwd real (sale del campo "cwd" de
+# los .jsonl) y una identidad estable del proyecto para que el backend las junte.
+function Get-ProjectMap {
+    $projectsDir = Join-Path $env:USERPROFILE ".claude\projects"
+    $map = @{}
+    if (-not (Test-Path $projectsDir)) { return $map }
+    foreach ($dir in Get-ChildItem -Path $projectsDir -Directory) {
+        $match = Get-ChildItem -Path $dir.FullName -Filter *.jsonl -File |
+            Select-String -Pattern '"cwd":"((?:[^"\\]|\\.)*)"' -List |
+            Select-Object -First 1
+        if (-not $match) { continue }
+        $cwd = ('"' + $match.Matches[0].Groups[1].Value + '"') | ConvertFrom-Json
+
+        # Identidad: nombre del repo del remote "origin" si la carpeta sigue
+        # existiendo y es repo git; si no (p.ej. se movio y la vieja ya no
+        # esta), el nombre de la ultima carpeta. Se usa solo el nombre del
+        # repo (no la URL completa) para que la carpeta vieja, que solo puede
+        # aportar su nombre, coincida con la nueva.
+        $name = (Split-Path -Leaf $cwd).ToLower()
+        $gitConfig = Join-Path $cwd ".git\config"
+        if (Test-Path $gitConfig) {
+            $inOrigin = $false
+            foreach ($line in Get-Content $gitConfig) {
+                if ($line -match '^\s*\[') { $inOrigin = $line -match '^\s*\[remote "origin"\]' }
+                elseif ($inOrigin -and $line -match '^\s*url\s*=\s*(.+?)\s*$') {
+                    $repo = ($Matches[1] -split '[/:]')[-1] -replace '\.git$', ''
+                    if ($repo) { $name = $repo.ToLower() }
+                    break
+                }
+            }
+        }
+        $map[$dir.Name] = @{ cwd = $cwd; project = $name }
+    }
+    return $map
+}
+
 function Send-Report {
     param($Payload)
-    $body = $Payload | ConvertTo-Json -Depth 20 -Compress
-    $headers = @{ "X-Claude-Usage-Token" = $config.token; "Content-Type" = "application/json" }
+    # Como bytes UTF-8: PowerShell 5.1 manda un -Body string como Latin-1 y
+    # las rutas con acentos (cwd del mapa de proyectos) llegaban como JSON invalido.
+    $body = [System.Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 20 -Compress))
+    $headers = @{ "X-Claude-Usage-Token" = $config.token; "Content-Type" = "application/json; charset=utf-8" }
     $uri = "$($config.server_url)/api/claude-usage/report"
 
     $maxAttempts = 3
@@ -109,6 +150,7 @@ try {
         source       = $config.source
         generated_at = (Get-Date).ToString("o")
         reports      = $reports
+        projects     = Get-ProjectMap
     }
 
     $ok = Send-Report -Payload $payload

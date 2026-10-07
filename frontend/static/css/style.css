@@ -499,6 +499,11 @@ main {
 .session-list .cu-session-project { color: var(--text-1); }
 .session-list .cu-session-meta { color: var(--text-2); font-size: 0.78rem; }
 .session-list-full { max-height: 420px; }
+.session-list li.cu-project { display: block; }
+.cu-project summary { display: flex; justify-content: space-between; cursor: pointer; }
+.cu-project summary .cu-session-meta { margin-left: 10px; text-align: right; }
+.cu-project-sessions { margin: 6px 0 0 16px; padding: 0; }
+.cu-project-sessions li:last-child { border-bottom: none; }
 
 .days-filter { display: flex; gap: 6px; margin-left: auto; }
 .days-btn {

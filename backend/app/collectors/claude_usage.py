@@ -45,6 +45,9 @@ class ClaudeUsagePush(BaseModel):
     source: str
     generated_at: str
     reports: dict[str, dict]
+    # ~/.claude/projects folder name -> {"cwd": real path, "project": identity}.
+    # Optional so pushes from reporters predating it are still accepted.
+    projects: dict[str, dict] | None = None
 
 
 # In-memory copy of the last received push, so repeated GETs don't hit disk.
@@ -204,3 +207,41 @@ async def get_report(period: str, since: str | None = None) -> dict:
         return data
     since_date = datetime.strptime(since, "%Y%m%d").date()
     return _filter_report(data, since_date)
+
+
+async def get_projects(since: str | None = None) -> dict:
+    """Sessions grouped by project identity, so one project that lived in
+    several folders (each its own ~/.claude/projects entry) shows as one row.
+    Folders the reporter couldn't map (or local ccusage fallback, which has no
+    map) stay as their own project keyed by folder name."""
+    sessions = (await get_report("session", since=since)).get("sessions", [])
+    pushed = _get_pushed()
+    folder_map = (pushed or {}).get("projects") or {}
+
+    groups: dict[str, dict] = {}
+    for s in sessions:
+        folder = s.get("projectPath") or s.get("sessionId", "")
+        info = folder_map.get(folder) or {}
+        key = info.get("project") or folder
+        # Unmapped folder names are encoded paths; their last "-" segment is
+        # the best readable guess (mapped names are used as-is).
+        name = info.get("project") or folder.split("-")[-1] or folder
+        g = groups.setdefault(key, {"project": key, "name": name, "folders": set(), "sessions": []})
+        g["folders"].add(folder)
+        g["sessions"].append({**s, "cwd": info.get("cwd")})
+
+    projects = []
+    for g in groups.values():
+        entries = sorted(g["sessions"], key=lambda e: e.get("totalCost", 0), reverse=True)
+        projects.append({
+            "project": g["project"],
+            "name": g["name"],
+            **_recompute_totals(entries),
+            "sessionCount": len(entries),
+            "folderCount": len(g["folders"]),
+            "firstActivity": min(e.get("firstActivity", "") for e in entries),
+            "lastActivity": max(e.get("lastActivity", "") for e in entries),
+            "sessions": entries,
+        })
+    projects.sort(key=lambda p: p["totalCost"], reverse=True)
+    return {"projects": projects}

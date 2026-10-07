@@ -1359,20 +1359,20 @@
     loadingLi.textContent = "Cargando datos de Claude Code…";
     list.appendChild(loadingLi);
     try {
-      const [dailyRes, sessionRes] = await Promise.all([
+      const [dailyRes, projectsRes] = await Promise.all([
         fetch(`/api/claude-usage?period=daily&days=${currentDays}`),
-        fetch(`/api/claude-usage?period=session&days=${currentDays}`),
+        fetch(`/api/claude-usage/projects?days=${currentDays}`),
       ]);
-      if (!dailyRes.ok || !sessionRes.ok) throw new Error("claude-usage unavailable");
+      if (!dailyRes.ok || !projectsRes.ok) throw new Error("claude-usage unavailable");
       const dailyData = await dailyRes.json();
-      const sessionData = await sessionRes.json();
+      const projects = (await projectsRes.json()).projects || [];
       // A newer request (e.g. the user clicked another day filter) already
       // started and will render; drop this now-stale response.
       if (requestId !== renderRequestId) return;
 
       document.getElementById("cu-total-cost").textContent = costFmt(dailyData.totals?.totalCost);
       document.getElementById("cu-total-tokens").textContent = tokensFmt(dailyData.totals?.totalTokens);
-      document.getElementById("cu-session-count").textContent = sessionData.sessions?.length ?? "--";
+      document.getElementById("cu-session-count").textContent = projects.reduce((n, p) => n + p.sessionCount, 0);
 
       const days = dailyData.daily || [];
       const today = days[days.length - 1];
@@ -1380,17 +1380,44 @@
       drawDailyCostChart(days);
 
       list.textContent = "";
-      const allSessions = [...(sessionData.sessions || [])].sort((a, b) => b.totalCost - a.totalCost);
-      for (const s of allSessions) {
-        const li = document.createElement("li");
-        const project = document.createElement("span");
-        project.className = "cu-session-project";
-        project.textContent = (s.projectPath || s.sessionId).split(/[/\\-]/).pop() || s.sessionId;
+      // One row per project (a project that moved between folders is one row
+      // with "N carpetas"); expanding it lists its sessions, sorted by cost.
+      const appendNameMeta = (parent, label, metaText) => {
+        const name = document.createElement("span");
+        name.className = "cu-session-project";
+        name.textContent = label;
         const meta = document.createElement("span");
         meta.className = "cu-session-meta";
-        meta.textContent = `${costFmt(s.totalCost)} · ${tokensFmt(s.totalTokens)} tok`;
-        li.appendChild(project);
-        li.appendChild(meta);
+        meta.textContent = metaText;
+        parent.appendChild(name);
+        parent.appendChild(meta);
+      };
+      for (const p of projects) {
+        const li = document.createElement("li");
+        li.className = "cu-project";
+        const details = document.createElement("details");
+        const summary = document.createElement("summary");
+        const folders = p.folderCount > 1 ? ` · ${p.folderCount} carpetas` : "";
+        appendNameMeta(
+          summary,
+          p.name,
+          `${costFmt(p.totalCost)} · ${tokensFmt(p.totalTokens)} tok · ${p.sessionCount} ses.${folders}`
+        );
+        summary.title =
+          `Entrada ${tokensFmt(p.inputTokens)} · Salida ${tokensFmt(p.outputTokens)} · ` +
+          `Caché escrita ${tokensFmt(p.cacheCreationTokens)} · Caché leída ${tokensFmt(p.cacheReadTokens)}\n` +
+          `${p.firstActivity.slice(0, 10)} → ${p.lastActivity.slice(0, 10)}`;
+        const sub = document.createElement("ul");
+        sub.className = "session-list cu-project-sessions";
+        for (const s of p.sessions) {
+          const row = document.createElement("li");
+          row.title = s.cwd || s.projectPath || "";
+          appendNameMeta(row, (s.lastActivity || "").slice(0, 10), `${costFmt(s.totalCost)} · ${tokensFmt(s.totalTokens)} tok`);
+          sub.appendChild(row);
+        }
+        details.appendChild(summary);
+        details.appendChild(sub);
+        li.appendChild(details);
         list.appendChild(li);
       }
     } catch (_) {

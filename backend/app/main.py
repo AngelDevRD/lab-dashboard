@@ -218,14 +218,17 @@ async def get_alert_count():
     return alert_center.count()
 
 
+def _claude_usage_since(days: str) -> str | None:
+    """YYYYMMDD cutoff for a days filter ("all" = no cutoff); raises ValueError."""
+    if days == "all":
+        return None
+    return (date.today() - timedelta(days=max(int(days), 1) - 1)).strftime("%Y%m%d")
+
+
 @app.get("/api/claude-usage")
 async def get_claude_usage(period: str = "daily", days: str = "30"):
-    since = None
     try:
-        if days != "all":
-            since = (date.today() - timedelta(days=max(int(days), 1) - 1)).strftime(
-                "%Y%m%d"
-            )
+        since = _claude_usage_since(days)
     except ValueError:
         return JSONResponse(
             status_code=422, content={"detail": f"invalid days: {days!r}"}
@@ -236,6 +239,21 @@ async def get_claude_usage(period: str = "daily", days: str = "30"):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
     except Exception as exc:
         logger.warning("claude_usage fetch failed: %s", exc)
+        return JSONResponse(status_code=502, content={"detail": "ccusage unavailable"})
+
+
+@app.get("/api/claude-usage/projects")
+async def get_claude_usage_projects(days: str = "30"):
+    try:
+        since = _claude_usage_since(days)
+    except ValueError:
+        return JSONResponse(
+            status_code=422, content={"detail": f"invalid days: {days!r}"}
+        )
+    try:
+        return await claude_usage.get_projects(since=since)
+    except Exception as exc:
+        logger.warning("claude_usage projects fetch failed: %s", exc)
         return JSONResponse(status_code=502, content={"detail": "ccusage unavailable"})
 
 
