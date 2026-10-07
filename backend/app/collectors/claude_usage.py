@@ -228,7 +228,13 @@ async def get_projects(since: str | None = None) -> dict:
         name = info.get("project") or folder.split("-")[-1] or folder
         g = groups.setdefault(key, {"project": key, "name": name, "folders": set(), "sessions": []})
         g["folders"].add(folder)
-        g["sessions"].append({**s, "cwd": info.get("cwd")})
+        # Only what the UI shows: per-model breakdowns would bloat a response
+        # that old tablets refetch every 2 min.
+        g["sessions"].append({
+            **{k: s.get(k) for k in ("sessionId", "projectPath", "firstActivity", "lastActivity")},
+            **{k: s.get(k, 0) for k in _SUM_FIELDS},
+            "cwd": info.get("cwd"),
+        })
 
     projects = []
     for g in groups.values():

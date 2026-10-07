@@ -15,6 +15,7 @@ def _session(folder, sid, tokens, cost, last):
         "totalCost": cost,
         "firstActivity": f"{last}T00:00:00Z",
         "lastActivity": f"{last}T01:00:00Z",
+        "modelBreakdowns": [{"modelName": "m", "cost": cost}],
     }
 
 
@@ -51,6 +52,7 @@ def test_folders_with_same_identity_are_one_project(monkeypatch):
     assert nexfit["lastActivity"].startswith("2026-09-01")
     assert [s["sessionId"] for s in nexfit["sessions"]] == ["b", "a"]
     assert nexfit["sessions"][0]["cwd"] == "C:\\new\\nexfit"
+    assert "modelBreakdowns" not in nexfit["sessions"][0]
     # Unmapped folder stays its own project.
     assert projects[1]["project"] == "C--Users-x-lab-dashboard"
     assert projects[1]["folderCount"] == 1
