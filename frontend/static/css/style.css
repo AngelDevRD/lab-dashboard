@@ -499,10 +499,22 @@ main {
 .session-list .cu-session-project { color: var(--text-1); }
 .session-list .cu-session-meta { color: var(--text-2); font-size: 0.78rem; }
 .session-list-full { max-height: 420px; }
-.session-list li.cu-project { display: block; }
-.cu-project summary { display: flex; justify-content: space-between; cursor: pointer; }
-.cu-project summary .cu-session-meta { margin-left: 10px; text-align: right; }
+.session-list li.cu-project { display: block; padding-right: 14px; }
+.cu-project-row { display: flex; align-items: baseline; cursor: pointer; }
+.cu-project-row .cu-session-project,
+.cu-project-sessions .cu-session-project {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
+/* Fixed-width right-aligned columns so numbers line up row to row (margins,
+   not gap: the old tablet WebView has no flex gap). */
+.cu-col { flex: none; margin-left: 10px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cu-col-cost { width: 5.5em; }
+.cu-col-tok { width: 5.5em; }
+.cu-col-ses { width: 4.5em; }
+.cu-col-dir { width: 6em; }
 .cu-project-sessions { margin: 6px 0 0 16px; padding: 0; }
+.cu-project-sessions.hidden { display: none; }
+.cu-project-sessions li { justify-content: flex-start; gap: 0; }
 .cu-project-sessions li:last-child { border-bottom: none; }
 
 .days-filter { display: flex; gap: 6px; margin-left: auto; }

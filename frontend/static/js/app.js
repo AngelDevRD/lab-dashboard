@@ -1381,43 +1381,53 @@
 
       list.textContent = "";
       // One row per project (a project that moved between folders is one row
-      // with "N carpetas"); expanding it lists its sessions, sorted by cost.
-      const appendNameMeta = (parent, label, metaText) => {
+      // with "N carpetas"); tapping it shows its sessions, sorted by cost.
+      // Numbers go in fixed-width columns so cost/tokens/sessions line up
+      // across rows. Plain div + click instead of <details>: the old tablet
+      // WebView ignores display:flex on <summary> and centered the name.
+      const appendRow = (parent, label, cols) => {
         const name = document.createElement("span");
         name.className = "cu-session-project";
         name.textContent = label;
-        const meta = document.createElement("span");
-        meta.className = "cu-session-meta";
-        meta.textContent = metaText;
         parent.appendChild(name);
-        parent.appendChild(meta);
+        for (const [cls, text] of cols) {
+          const col = document.createElement("span");
+          col.className = `cu-session-meta cu-col ${cls}`;
+          col.textContent = text;
+          parent.appendChild(col);
+        }
       };
       for (const p of projects) {
         const li = document.createElement("li");
         li.className = "cu-project";
-        const details = document.createElement("details");
-        const summary = document.createElement("summary");
-        const folders = p.folderCount > 1 ? ` · ${p.folderCount} carpetas` : "";
-        appendNameMeta(
-          summary,
-          p.name,
-          `${costFmt(p.totalCost)} · ${tokensFmt(p.totalTokens)} tok · ${p.sessionCount} ses.${folders}`
-        );
-        summary.title =
+        const head = document.createElement("div");
+        head.className = "cu-project-row";
+        appendRow(head, p.name, [
+          ["cu-col-cost", costFmt(p.totalCost)],
+          ["cu-col-tok", `${tokensFmt(p.totalTokens)} tok`],
+          ["cu-col-ses", `${p.sessionCount} ses.`],
+          ["cu-col-dir", p.folderCount > 1 ? `${p.folderCount} carpetas` : ""],
+        ]);
+        head.title =
           `Entrada ${tokensFmt(p.inputTokens)} · Salida ${tokensFmt(p.outputTokens)} · ` +
           `Caché escrita ${tokensFmt(p.cacheCreationTokens)} · Caché leída ${tokensFmt(p.cacheReadTokens)}\n` +
           `${p.firstActivity.slice(0, 10)} → ${p.lastActivity.slice(0, 10)}`;
         const sub = document.createElement("ul");
-        sub.className = "session-list cu-project-sessions";
+        sub.className = "session-list cu-project-sessions hidden";
         for (const s of p.sessions) {
           const row = document.createElement("li");
           row.title = s.cwd || s.projectPath || "";
-          appendNameMeta(row, (s.lastActivity || "").slice(0, 10), `${costFmt(s.totalCost)} · ${tokensFmt(s.totalTokens)} tok`);
+          appendRow(row, (s.lastActivity || "").slice(0, 10), [
+            ["cu-col-cost", costFmt(s.totalCost)],
+            ["cu-col-tok", `${tokensFmt(s.totalTokens)} tok`],
+            ["cu-col-ses", ""],
+            ["cu-col-dir", ""],
+          ]);
           sub.appendChild(row);
         }
-        details.appendChild(summary);
-        details.appendChild(sub);
-        li.appendChild(details);
+        head.addEventListener("click", () => sub.classList.toggle("hidden"));
+        li.appendChild(head);
+        li.appendChild(sub);
         list.appendChild(li);
       }
     } catch (_) {
