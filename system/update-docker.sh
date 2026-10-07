@@ -17,7 +17,7 @@ set -euo pipefail
 REPO_DIR="/opt/lab-dashboard"
 LOG_DIR="${REPO_DIR}/logs"
 LOG_FILE="${LOG_DIR}/update-docker.log"
-TIMESTAMP=$(date -Iseconds)
+LOCK_FILE="/run/lock/lab-dashboard-update.lock"
 HEALTH_URL="http://localhost:8600/api/health"
 MAX_RETRIES=12
 RETRY_DELAY=5
@@ -27,8 +27,17 @@ LAST_BUILT_FILE="${REPO_DIR}/.last-built-commit"
 mkdir -p "$LOG_DIR"
 
 log() {
-  echo "$TIMESTAMP $*" | tee -a "$LOG_FILE"
+  echo "$(date -Iseconds) [$$] $*" | tee -a "$LOG_FILE"
 }
+
+# Una sola actualizacion a la vez: el timer y una corrida manual pueden
+# coincidir y hacer build/up -d (o rollback) en paralelo. El lock vive en
+# /run/lock (fuera del repo, asi no cuenta como archivo sin trackear).
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  log "Otra actualización está en curso (lock $LOCK_FILE). Saliendo sin hacer nada."
+  exit 0
+fi
 
 log "=== Inicio de actualización ==="
 
